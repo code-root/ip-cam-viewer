@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import YAML from 'yaml';
 import { config } from '../config.js';
+import { isWindows } from '../lib/platform.js';
 import { decrypt } from '../lib/crypto.js';
 import type { Camera } from '@prisma/client';
 
@@ -110,12 +111,14 @@ export async function startGo2rtc(): Promise<void> {
     return;
   }
 
+  const spawnEnv = { ...process.env };
+  if (!isWindows) {
+    spawnEnv.PATH = `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`;
+  }
+
   go2rtcProcess = spawn(config.go2rtcBin, ['-config', config.go2rtcConfig], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || ''}`,
-    },
+    env: spawnEnv,
   });
 
   go2rtcProcess.stdout?.on('data', (d) => console.log('[go2rtc]', d.toString().trim()));

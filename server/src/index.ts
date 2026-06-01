@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import cron from 'node-cron';
 import { config } from './config.js';
+import { faceSetupCommand, portInUseHint } from './lib/platform.js';
 import { startGo2rtc, syncCameraStreams, stopGo2rtc } from './streams/go2rtc.js';
 import { prisma } from './lib/prisma.js';
 import { initWebSocket, simulateMotionEvents } from './ws/hub.js';
@@ -84,7 +85,7 @@ async function bootstrap() {
 
   void loadFaceModels().then((ok) => {
     if (!ok) {
-      console.warn('[face] Recognition unavailable at startup:', 'run bash scripts/setup-face-python.sh');
+      console.warn('[face] Recognition unavailable at startup — run:', faceSetupCommand);
     }
   });
 
@@ -97,7 +98,7 @@ async function bootstrap() {
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
       console.error(
-        `[server] Port ${config.port} is already in use. Stop the other process: lsof -i :${config.port}`
+        `[server] Port ${config.port} is already in use. Stop the other process: ${portInUseHint(config.port)}`
       );
     } else {
       console.error('[server]', err);

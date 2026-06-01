@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth, requirePermission } from '../lib/auth-middleware.js';
 import { config } from '../config.js';
+import { defaultPythonDisplay, faceSetupCommand } from '../lib/platform.js';
 import {
   extractFaceFromBuffer,
   descriptorToJson,
@@ -34,7 +35,7 @@ router.get('/status', async (_req, res) => {
     res.json({
       available,
       error: available ? null : getFaceLoadError(),
-      python: available ? process.env.PYTHON_BIN || '.venv/bin/python3' : undefined,
+      python: available ? process.env.PYTHON_BIN || defaultPythonDisplay : undefined,
     });
   } catch (e) {
     res.status(500).json({ available: false, error: String(e) });
@@ -268,7 +269,7 @@ router.post('/:id/enroll-face', requirePermission('manage_employees'), upload.si
   if (!(await loadFaceModels())) {
     return res.status(503).json({
       error: getFaceLoadError() || 'Face recognition not available',
-      hint: 'Run: bash scripts/setup-face-python.sh  or set PYTHON_BIN in .env to your Python with face_recognition',
+      hint: `Run: ${faceSetupCommand}  or set PYTHON_BIN in .env to your Python with face_recognition`,
     });
   }
   const { descriptor, bbox } = await extractFaceFromBuffer(req.file.buffer);

@@ -22,7 +22,7 @@ try:
     import numpy as np
     from PIL import Image
 except ImportError as e:
-    print(json.dumps({"error": f"Missing packages: {e}. Run: bash scripts/setup-face-python.sh"}))
+    print(json.dumps({"error": f"Missing packages: {e}. Run setup-face-python (see README for Windows/macOS)."}))
     sys.exit(1)
 
 MAX_SIDE = int(os.environ.get("FACE_DETECT_MAX_SIDE", "1920"))

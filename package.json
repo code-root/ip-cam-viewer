@@ -12,12 +12,13 @@
     "db:generate": "npm run db:generate -w server",
     "db:migrate": "npm run db:migrate -w server",
     "db:seed": "npm run db:seed -w server",
-    "go2rtc:install": "bash scripts/install-go2rtc.sh"
+    "db:deploy": "npm run db:deploy -w server",
+    "go2rtc:install": "node scripts/install-go2rtc.mjs",
+    "setup:face": "bash scripts/setup-face-python.sh",
+    "setup:face:win": "scripts\\setup-face-python.bat",
+    "setup:win": "scripts\\setup-windows.bat"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
-  },
-  "dependencies": {
-    "@esbuild/darwin-arm64": "^0.28.0"
   }
 }

@@ -2,6 +2,7 @@ import path from 'path';
 import type { Camera } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { config } from '../config.js';
+import { faceSetupCommand } from '../lib/platform.js';
 import * as onvif from '../onvif/service.js';
 import { registerStream, fetchGo2rtcFrame } from '../streams/go2rtc.js';
 import {
@@ -42,10 +43,10 @@ function friendlyError(err: unknown): string {
   const raw = String(err instanceof Error ? err.message : err);
   if (raw.includes('timed out')) return 'انتهت مهلة التحليل — المحاولة التالية قريباً';
   if (raw.includes('face_recognition not found') || raw.includes('not installed')) {
-    return 'محرك التعرف غير مثبت — شغّل setup-face-python.sh';
+    return `محرك التعرف غير مثبت — شغّل ${faceSetupCommand}`;
   }
   if (raw.includes('No module') || raw.includes('ultralytics') || raw.includes('mediapipe')) {
-    return 'حزمة Python ناقصة — شغّل bash scripts/setup-face-python.sh';
+    return `حزمة Python ناقصة — شغّل ${faceSetupCommand}`;
   }
   if (raw.includes('Could not capture') || raw.includes('FRAME_CAPTURE')) {
     return 'تعذّر التقاط صورة من الكاميرا';

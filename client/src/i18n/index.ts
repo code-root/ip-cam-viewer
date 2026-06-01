@@ -107,7 +107,8 @@ const resources = {
       faceScanError: 'خطأ في التحليل',
       faceScanUnavailable: 'التعرف غير متاح',
       faceReady: 'نظام التعرف على الوجوه جاهز',
-      faceNotReady: 'التعرف غير متاح — شغّل من مجلد المشروع: bash scripts/setup-face-python.sh',
+      faceNotReady:
+        'التعرف غير متاح — على Windows: scripts\\setup-face-python.bat | على macOS/Linux: bash scripts/setup-face-python.sh',
       enrollNoFace: 'لم يُكتشف وجه — استخدم صورة أمامية واضحة للوجه',
       enrolledFaces: 'صور الوجه المسجّلة',
       noFacesEnrolled: 'لم يُسجَّل وجه بعد',
@@ -241,7 +242,8 @@ const resources = {
       faceScanError: 'Analysis error',
       faceScanUnavailable: 'Recognition unavailable',
       faceReady: 'Face recognition ready',
-      faceNotReady: 'Face recognition unavailable — run: bash scripts/setup-face-python.sh',
+      faceNotReady:
+        'Face recognition unavailable — Windows: scripts\\setup-face-python.bat | macOS/Linux: bash scripts/setup-face-python.sh',
       enrollNoFace: 'No face detected — use a clear front-facing photo',
       enrolledFaces: 'Enrolled Face Photos',
       noFacesEnrolled: 'No face enrolled yet',

@@ -3,6 +3,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { config } from '../config.js';
+import { faceSetupCommand } from '../lib/platform.js';
 import { getPythonCandidates, resolvePythonBin } from './python.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -46,7 +47,7 @@ async function runPythonDetect(imagePath: string): Promise<{
   if (!pythonBin) {
     const tried = getPythonCandidates().join(', ');
     throw new Error(
-      `face_recognition not found. Set PYTHON_BIN in .env or run: cd ip-cam-viewer && python3 -m venv .venv && .venv/bin/pip install face_recognition pillow (tried: ${tried})`
+      `face_recognition not found. Set PYTHON_BIN in .env or run: ${faceSetupCommand} (tried: ${tried})`
     );
   }
 
@@ -88,7 +89,7 @@ async function runPythonDetect(imagePath: string): Promise<{
 async function checkPythonFaceBackend(): Promise<boolean> {
   const pythonBin = await resolvePythonBin();
   if (!pythonBin) {
-    loadError = `face_recognition not installed. Run: bash scripts/setup-face-python.sh (tried: ${getPythonCandidates().join(', ')})`;
+    loadError = `face_recognition not installed. Run: ${faceSetupCommand} (tried: ${getPythonCandidates().join(', ')})`;
     return false;
   }
 
@@ -116,7 +117,7 @@ export async function loadFaceModels(): Promise<boolean> {
 
   backendReady = false;
   console.warn('[face] Face recognition unavailable:', loadError);
-  console.warn('[face] Setup: cd ip-cam-viewer && bash scripts/setup-face-python.sh');
+  console.warn(`[face] Setup: ${faceSetupCommand}`);
   return false;
 }
 

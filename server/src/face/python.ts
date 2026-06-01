@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { config } from '../config.js';
+import {
+  isFilesystemPythonCandidate,
+  isWindows,
+  venvPythonPaths,
+  virtualEnvPythonPaths,
+} from '../lib/platform.js';
 
 let resolvedPython: string | null = null;
 let resolveLogged = false;
@@ -27,23 +33,22 @@ export function getPythonCandidates(): string[] {
   }
 
   if (process.env.VIRTUAL_ENV) {
-    candidates.push(path.join(process.env.VIRTUAL_ENV, 'bin', 'python3'));
-    candidates.push(path.join(process.env.VIRTUAL_ENV, 'bin', 'python'));
+    candidates.push(...virtualEnvPythonPaths(process.env.VIRTUAL_ENV));
   }
 
-  candidates.push(
-    path.join(root, '.venv', 'bin', 'python3'),
-    path.join(root, '.venv', 'bin', 'python'),
-    path.join(root, 'venv', 'bin', 'python3'),
-    'python3',
-    'python'
-  );
+  candidates.push(...venvPythonPaths(root));
+
+  if (isWindows) {
+    candidates.push('py', 'python', 'python3');
+  } else {
+    candidates.push('python3', 'python');
+  }
 
   const normalized = candidates
     .filter(Boolean)
     .map((bin) => {
       if (path.isAbsolute(bin)) return bin;
-      if (bin.includes('/')) return path.resolve(root, bin);
+      if (isFilesystemPythonCandidate(bin)) return path.resolve(root, bin);
       return bin;
     });
 
@@ -54,7 +59,10 @@ function runImportCheck(pythonBin: string): Promise<{ ok: boolean; detail: strin
   return new Promise((resolve) => {
     const code =
       'import face_recognition_models, face_recognition; import numpy, PIL; print("ok")';
-    const proc = spawn(pythonBin, ['-c', code], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn(pythonBin, ['-c', code], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: isWindows && !isFilesystemPythonCandidate(pythonBin),
+    });
     let out = '';
     let err = '';
     proc.stdout.on('data', (d) => {
@@ -78,7 +86,7 @@ export async function resolvePythonBin(): Promise<string | null> {
   const tried: Array<{ bin: string; error: string }> = [];
 
   for (const bin of getPythonCandidates()) {
-    if (bin.includes('/') && !exists(bin)) continue;
+    if (isFilesystemPythonCandidate(bin) && !exists(bin)) continue;
 
     const { ok, detail } = await runImportCheck(bin);
     if (ok) {

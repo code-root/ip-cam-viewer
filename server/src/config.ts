@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { defaultGo2rtcRel } from './lib/platform.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -19,7 +20,7 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
   encryptionKey: process.env.ENCRYPTION_KEY || '0123456789abcdef0123456789abcdef',
-  go2rtcBin: resolveFromRoot(process.env.GO2RTC_BIN, 'bin/go2rtc'),
+  go2rtcBin: resolveFromRoot(process.env.GO2RTC_BIN, defaultGo2rtcRel),
   go2rtcApi: process.env.GO2RTC_API || 'http://127.0.0.1:1984',
   go2rtcConfig: resolveFromRoot(process.env.GO2RTC_CONFIG, 'config/go2rtc.yaml'),
   recordingsPath: process.env.RECORDINGS_PATH || path.join(root, 'data/recordings'),
