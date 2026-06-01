@@ -1,0 +1,100 @@
+.face-live-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.face-live-status {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 4px;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.face-live-status--scanning {
+  background: rgba(59, 130, 246, 0.85);
+  color: #eff6ff;
+}
+
+.face-live-status--error,
+.face-live-status--unavailable {
+  background: rgba(239, 68, 68, 0.9);
+  color: #fff;
+}
+
+.face-live-status__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  animation: face-scan-pulse 1s ease-in-out infinite;
+}
+
+@keyframes face-scan-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.face-live-box {
+  position: absolute;
+  border: 2px solid #4ade80;
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+}
+
+.face-live-box--unknown {
+  border-color: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.45);
+}
+
+.face-live-box--person {
+  border: 2px dashed #60a5fa;
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(96, 165, 250, 0.35);
+}
+
+.face-live-label {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 2px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(34, 197, 94, 0.92);
+  color: #052e16;
+  border-radius: 4px;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.face-live-label--unknown {
+  background: rgba(251, 191, 36, 0.92);
+  color: #422006;
+}
+
+.face-live-label--person {
+  background: rgba(59, 130, 246, 0.92);
+  color: #eff6ff;
+}

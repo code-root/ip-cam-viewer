@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  operator
+  viewer
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String
+  role         Role      @default(viewer)
+  totpSecret   String?
+  totpEnabled  Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  cameraAccess CameraAccess[]
+  layoutPresets LayoutPreset[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+}
+
+model Camera {
+  id              String   @id @default(uuid())
+  name            String
+  host            String
+  onvifPort       Int      @default(80)
+  username        String
+  passwordEnc     String
+  rtspMain        String?
+  rtspSub         String?
+  rtspOverride    String?
+  manufacturer    String?
+  model           String?
+  supportsPtz     Boolean  @default(false)
+  supportsAudio   Boolean  @default(false)
+  privacyMasks    String   @default("[]")
+  videoTransform  String   @default("{}")
+  groupId         String?
+  group           CameraGroup? @relation(fields: [groupId], references: [id])
+  pinX            Float?
+  pinY            Float?
+  floorPlanId     String?
+  floorPlan       FloorPlan? @relation(fields: [floorPlanId], references: [id])
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  recordings      Recording[]
+  cameraAccess    CameraAccess[]
+  scheduledSnapshots ScheduledSnapshot[]
+  movementLogs       MovementLog[]
+  faceDetectionEvents FaceDetectionEvent[]
+  faceRecognitionEnabled Boolean @default(true)
+}
+
+model CameraGroup {
+  id        String   @id @default(uuid())
+  name      String
+  cameras   Camera[]
+  createdAt DateTime @default(now())
+}
+
+model CameraAccess {
+  id       String @id @default(uuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cameraId String
+  camera   Camera @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  @@unique([userId, cameraId])
+}
+
+model LayoutPreset {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  gridSize  Int      @default(4)
+  cameraIds String
+  createdAt DateTime @default(now())
+}
+
+model Recording {
+  id        String   @id @default(uuid())
+  cameraId  String
+  camera    Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  filename  String
+  path      String
+  startedAt DateTime
+  endedAt   DateTime?
+  sizeBytes Int?
+  createdAt DateTime @default(now())
+}
+
+model FloorPlan {
+  id        String   @id @default(uuid())
+  name      String
+  imagePath String
+  width     Int      @default(800)
+  height    Int      @default(600)
+  cameras   Camera[]
+  createdAt DateTime @default(now())
+}
+
+model NotificationChannel {
+  id        String   @id @default(uuid())
+  name      String
+  type      String
+  config    String
+  enabled   Boolean  @default(true)
+  events    String   @default("[\"motion\",\"offline\"]")
+  createdAt DateTime @default(now())
+}
+
+model ScheduledSnapshot {
+  id         String   @id @default(uuid())
+  cameraId   String
+  camera     Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  intervalMin Int     @default(15)
+  enabled    Boolean  @default(true)
+  lastRunAt  DateTime?
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+}
+
+model Employee {
+  id           String        @id @default(uuid())
+  employeeCode String        @unique
+  fullName     String
+  department   String?
+  jobTitle     String?
+  notes        String?
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  faceProfiles FaceProfile[]
+  movementLogs MovementLog[]
+  faceEvents   FaceDetectionEvent[]
+}
+
+model FaceProfile {
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  descriptor String
+  photoPath  String
+  label      String   @default("primary")
+  createdAt  DateTime @default(now())
+}
+
+model MovementLog {
+  id             String   @id @default(uuid())
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  cameraId       String
+  camera         Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  enteredAt      DateTime
+  exitedAt       DateTime?
+  lastSeenAt     DateTime
+  confidence     Float
+  entrySnapshot  String?
+  exitSnapshot   String?
+  createdAt      DateTime @default(now())
+  detections     FaceDetectionEvent[]
+}
+
+model FaceDetectionEvent {
+  id            String       @id @default(uuid())
+  employeeId    String?
+  employee      Employee?    @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  cameraId      String
+  camera        Camera       @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  movementLogId String?
+  movementLog   MovementLog? @relation(fields: [movementLogId], references: [id], onDelete: SetNull)
+  detectedAt    DateTime     @default(now())
+  confidence    Float
+  snapshotPath  String?
+  isUnknown     Boolean      @default(false)
+  bbox          String?
+}

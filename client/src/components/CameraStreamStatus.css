@@ -1,0 +1,88 @@
+.stream-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+  line-height: 0;
+}
+
+.stream-status--online {
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.stream-status--offline {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.stream-status__wifi {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Live broadcast: pulsing dot + expanding rings */
+.stream-status__live {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.stream-status__live-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: currentColor;
+  z-index: 2;
+  animation: stream-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.stream-status__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  opacity: 0;
+  animation: stream-ring-expand 1.8s ease-out infinite;
+}
+
+.stream-status__ring--2 {
+  animation-delay: 0.6s;
+}
+
+@keyframes stream-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(0.88);
+  }
+}
+
+@keyframes stream-ring-expand {
+  0% {
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    opacity: 0.85;
+  }
+  100% {
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    opacity: 0;
+  }
+}

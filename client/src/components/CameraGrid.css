@@ -1,0 +1,6 @@
+.camera-grid {
+  display: grid;
+  gap: 0.75rem;
+  height: calc(100vh - 140px);
+  min-height: 400px;
+}

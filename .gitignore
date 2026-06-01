@@ -1,0 +1,9 @@
+node_modules/
+.venv/
+dist/
+.env
+*.db
+data/
+bin/go2rtc
+.DS_Store
+*.log

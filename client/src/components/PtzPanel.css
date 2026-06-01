@@ -1,0 +1,40 @@
+.ptz-panel h4 {
+  margin-bottom: 0.75rem;
+}
+
+.ptz-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+  max-width: 140px;
+  margin-bottom: 0.75rem;
+}
+
+.ptz-grid button {
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.ptz-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.ptz-speed-value {
+  font-size: 0.8rem;
+  color: var(--muted);
+  align-self: flex-end;
+}
+
+.ptz-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}

@@ -1,0 +1,44 @@
+.camera-quick-actions {
+  position: relative;
+  display: inline-flex;
+}
+
+.camera-quick-actions__trigger {
+  min-width: 2rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.camera-quick-actions__menu {
+  position: absolute;
+  top: 100%;
+  inset-inline-end: 0;
+  z-index: 50;
+  min-width: 11rem;
+  margin-top: 0.25rem;
+  padding: 0.35rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.camera-quick-actions__menu button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.85rem;
+  text-align: start;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.camera-quick-actions__menu button:hover {
+  background: var(--surface2);
+}
+
+.camera-quick-actions__danger {
+  color: var(--danger) !important;
+}
