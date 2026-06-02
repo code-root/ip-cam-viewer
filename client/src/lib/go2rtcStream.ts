@@ -10,18 +10,8 @@ export type Go2rtcStreamCallbacks = {
 
 /** Target live edge buffer (seconds) for MSE fallback — minimal = lower latency. */
 const MSE_LIVE_BUFFER_SEC = 0.35;
-/** HTTP JPEG poll interval when WebRTC/MSE unavailable (ms). */
-const HTTP_FALLBACK_MS = 120;
 const WS_CONNECT_TIMEOUT_MS = 2500;
 const RECONNECT_MS = 800;
-
-/** Vite's WebSocket proxy to go2rtc is unreliable — use direct go2rtc in dev. */
-function resolveGo2rtcHttpBase(): string {
-  const env = import.meta.env.VITE_GO2RTC_URL as string | undefined;
-  if (env) return env.replace(/\/$/, '');
-  if (import.meta.env.DEV) return 'http://127.0.0.1:1984';
-  return `${location.origin}/go2rtc`;
-}
 
 function resolveGo2rtcWsBase(): string {
   const env = import.meta.env.VITE_GO2RTC_WS as string | undefined;
@@ -40,10 +30,8 @@ export class Go2rtcStream {
   private connectTs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private httpFallbackTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private liveViaRtc = false;
-  private useHttpFallback = false;
   private wsEverOpened = false;
 
   constructor(
@@ -60,10 +48,8 @@ export class Go2rtcStream {
   stop() {
     this.stopped = true;
     this.liveViaRtc = false;
-    this.useHttpFallback = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.wsConnectTimer) clearTimeout(this.wsConnectTimer);
-    if (this.httpFallbackTimer) clearInterval(this.httpFallbackTimer);
     this.disconnect();
   }
 
@@ -89,10 +75,6 @@ export class Go2rtcStream {
 
   private connect() {
     if (this.stopped) return;
-    if (this.useHttpFallback) {
-      this.startHttpFallback();
-      return;
-    }
     if (this.ws) return;
     this.connectTs = Date.now();
     this.wsEverOpened = false;
@@ -102,7 +84,9 @@ export class Go2rtcStream {
 
     this.wsConnectTimer = setTimeout(() => {
       if (!this.wsEverOpened && !this.stopped) {
-        this.startHttpFallback();
+        // WebRTC path unavailable: keep last frame and mark offline.
+        Go2rtcStream.captureToImage(this.video, this.freezeTarget());
+        this.callbacks.onOffline?.();
       }
     }, WS_CONNECT_TIMEOUT_MS);
 
@@ -113,40 +97,8 @@ export class Go2rtcStream {
     });
     ws.addEventListener('close', () => this.onWsClose());
     ws.addEventListener('error', () => {
-      if (!this.wsEverOpened && !this.stopped) {
-        this.startHttpFallback();
-      } else {
-        this.callbacks.onOffline?.();
-      }
+      this.callbacks.onOffline?.();
     });
-  }
-
-  /** Fast JPEG polling when WebSocket/WebRTC path is unavailable. */
-  private startHttpFallback() {
-    if (this.stopped || this.useHttpFallback) return;
-    this.useHttpFallback = true;
-    this.disconnect();
-    const freeze = this.freezeTarget();
-    const url = `${resolveGo2rtcHttpBase()}/api/frame.jpeg?src=${encodeURIComponent(this.streamName)}`;
-
-    const tick = () => {
-      if (this.stopped) return;
-      const probe = new Image();
-      probe.onload = () => {
-        freeze.src = probe.src;
-        freeze.style.opacity = '1';
-        this.video.style.opacity = '0';
-        this.callbacks.onOnline?.();
-      };
-      probe.onerror = () => {
-        /* keep last frame — do not clear freeze.src */
-        this.callbacks.onOffline?.();
-      };
-      probe.src = `${url}&t=${Date.now()}`;
-    };
-
-    tick();
-    this.httpFallbackTimer = setInterval(tick, HTTP_FALLBACK_MS);
   }
 
   private send(msg: object) {
@@ -156,11 +108,6 @@ export class Go2rtcStream {
   }
 
   private onWsOpen() {
-    if (this.httpFallbackTimer) {
-      clearInterval(this.httpFallbackTimer);
-      this.httpFallbackTimer = null;
-    }
-    this.useHttpFallback = false;
     this.ondata = null;
     this.onmessage = {};
 
@@ -201,17 +148,12 @@ export class Go2rtcStream {
   private onWsClose() {
     this.ws = null;
     if (this.stopped || this.liveViaRtc) return;
-    if (!this.wsEverOpened) {
-      this.startHttpFallback();
-      return;
-    }
     Go2rtcStream.captureToImage(this.video, this.freezeTarget());
     this.callbacks.onOffline?.();
     const delay = Math.max(RECONNECT_MS * 2 - (Date.now() - this.connectTs), RECONNECT_MS);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.disconnectPc();
-      this.useHttpFallback = false;
       this.connect();
     }, delay);
   }
