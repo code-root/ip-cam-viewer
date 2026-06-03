@@ -6,6 +6,76 @@ import {
   matchFaceWithMargin,
   type KnownFace,
 } from './service.js';
+import { loadGlobalFingerprintsInto, persistGlobalTrackSnapshot } from './global-face-store.js';
+
+export interface CrossCameraEvent {
+  globalTrackId: string;
+  globalTrackNum: number;
+  fromCameraId: string;
+  toCameraId: string;
+  employeeId?: string;
+  fullName?: string;
+}
+
+let crossCameraHandler: ((ev: CrossCameraEvent) => void) | null = null;
+
+export function setCrossCameraHandler(fn: ((ev: CrossCameraEvent) => void) | null) {
+  crossCameraHandler = fn;
+}
+
+export async function initGlobalFaceTracksFromDb(): Promise<void> {
+  const tmp = new Map<
+    string,
+    {
+      globalTrackId: string;
+      globalTrackNum: number;
+      descriptor: Float32Array;
+      sampleCount: number;
+      employeeId?: string;
+      fullName?: string;
+      hits: number;
+      cameraIds: Set<string>;
+      lastCameraId: string;
+      lastAt: number;
+    }
+  >();
+  await loadGlobalFingerprintsInto(tmp, (n) => {
+    globalTrackSeq = Math.max(globalTrackSeq, n);
+  });
+  for (const [id, s] of tmp) {
+    globalTracks.set(id, {
+      globalTrackId: s.globalTrackId,
+      globalTrackNum: s.globalTrackNum,
+      descriptor: s.descriptor,
+      sampleCount: s.sampleCount,
+      employeeId: s.employeeId,
+      profileId: undefined,
+      fullName: s.fullName,
+      hits: s.hits,
+      cameraIds: s.cameraIds,
+      lastCameraId: s.lastCameraId,
+      lastAt: s.lastAt,
+    });
+  }
+}
+
+export function getGlobalTrackMeta(globalTrackId: string): {
+  cameraIds: string[];
+  lastCameraId: string;
+  globalTrackNum: number;
+  employeeId?: string;
+  fullName?: string;
+} | null {
+  const t = globalTracks.get(globalTrackId);
+  if (!t) return null;
+  return {
+    cameraIds: [...t.cameraIds],
+    lastCameraId: t.lastCameraId,
+    globalTrackNum: t.globalTrackNum,
+    employeeId: t.employeeId,
+    fullName: t.fullName,
+  };
+}
 
 export interface Bbox {
   x: number;
@@ -209,10 +279,38 @@ function updateGlobalTrack(
     globalTrack.fullName = slot.fullName;
   }
 
+  const fromCameraId = globalTrack.lastCameraId;
+  const isNewCamera = !globalTrack.cameraIds.has(cameraId);
+
   globalTrack.hits += 1;
   globalTrack.cameraIds.add(cameraId);
   globalTrack.lastCameraId = cameraId;
   globalTrack.lastAt = now;
+
+  if (isNewCamera && globalTrack.cameraIds.size > 1 && fromCameraId && fromCameraId !== cameraId) {
+    crossCameraHandler?.({
+      globalTrackId: globalTrack.globalTrackId,
+      globalTrackNum: globalTrack.globalTrackNum,
+      fromCameraId,
+      toCameraId: cameraId,
+      employeeId: globalTrack.employeeId,
+      fullName: globalTrack.fullName,
+    });
+  }
+
+  persistGlobalTrackSnapshot({
+    globalTrackId: globalTrack.globalTrackId,
+    globalTrackNum: globalTrack.globalTrackNum,
+    descriptor: globalTrack.descriptor,
+    sampleCount: globalTrack.sampleCount,
+    employeeId: globalTrack.employeeId,
+    fullName: globalTrack.fullName,
+    hits: globalTrack.hits,
+    cameraIds: globalTrack.cameraIds,
+    lastCameraId: globalTrack.lastCameraId,
+    lastAt: globalTrack.lastAt,
+  });
+
   claimedGlobal.add(globalTrack.globalTrackId);
   return globalTrack;
 }

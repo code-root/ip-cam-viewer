@@ -19,8 +19,11 @@ python scripts\company-edge-gui\app.py
 على **Windows** (مرة واحدة):
 
 ```bat
+cd /d "C:\Users\...\Desktop\ip-cam-viewer-main"
 scripts\company-edge-gui\build-windows.bat
 ```
+
+**مهم:** شغّل الملف بالنقر المزدوج أو من CMD — لا تلصق محتوى الملف في سطر الأوامر.
 
 الناتج: `dist-launcher\CompanyEdgeLauncher.exe`
 

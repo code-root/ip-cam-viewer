@@ -9,8 +9,9 @@ echo  IP Camera Viewer - Windows setup
 echo ========================================
 echo.
 
-where node >nul 2>&1 || (
-  echo [ERROR] Node.js not found. Install from https://nodejs.org/
+where node >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Node.js not found. Install from nodejs.org
   pause
   exit /b 1
 )
@@ -23,6 +24,8 @@ if not exist "%ROOT%\.env" (
 
 echo Installing npm packages...
 call npm install
+if errorlevel 1 goto :fail
+call npm install http-proxy@^1.18.1 -w server
 if errorlevel 1 goto :fail
 
 echo.
@@ -53,10 +56,15 @@ call "%ROOT%\scripts\setup-face-python.bat"
 :done
 echo.
 echo ========================================
-echo  Done. Start the app with: npm run dev
+echo  Done.
 echo ========================================
-echo  Web UI:  http://localhost:5173
-echo  API:     http://localhost:3000
+echo  Development:  npm run dev
+echo    Web UI:  http://localhost:5173
+echo    API:     http://localhost:3000
+echo.
+echo  Company PC (production, one port):
+echo    scripts\start-company-edge.bat
+echo    Web+API+WebSocket: http://YOUR-LAN-IP:3000
 echo  Login:   admin / admin123
 echo.
 echo  Add to .env if not already set:

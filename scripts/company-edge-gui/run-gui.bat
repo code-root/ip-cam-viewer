@@ -1,9 +1,16 @@
 @echo off
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
-where python >nul 2>&1 || (
-  echo ثبّت Python من https://www.python.org/
+
+set "PY=py -3"
+py -3 --version >nul 2>&1
+if errorlevel 1 set "PY=python"
+%PY% --version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Python is not installed. Install from python.org
   pause
   exit /b 1
 )
-python "%~dp0app.py"
+
+%PY% "%~dp0app.py"
+pause

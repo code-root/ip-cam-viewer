@@ -59,6 +59,7 @@
   border: 2px solid #4ade80;
   border-radius: 4px;
   box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+  will-change: left, top, width, height;
 }
 
 .face-live-box--unknown {
@@ -97,4 +98,41 @@
 .face-live-label--person {
   background: rgba(59, 130, 246, 0.92);
   color: #eff6ff;
+}
+
+.face-live-box--object {
+  border: 2px solid #a78bfa;
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.4);
+}
+
+.face-live-box--chair,
+.face-live-box--couch {
+  border-color: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.face-live-box--tv,
+.face-live-box--laptop,
+.face-live-box--cell_phone {
+  border-color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.45);
+}
+
+.face-live-label--object {
+  background: rgba(139, 92, 246, 0.92);
+  color: #f5f3ff;
+}
+
+.face-live-label--chair,
+.face-live-label--couch {
+  background: rgba(245, 158, 11, 0.92);
+  color: #422006;
+}
+
+.face-live-label--tv,
+.face-live-label--laptop,
+.face-live-label--cell_phone {
+  background: rgba(14, 165, 233, 0.92);
+  color: #f0f9ff;
 }

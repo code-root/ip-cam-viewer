@@ -9,7 +9,12 @@ let io: Server | null = null;
 
 export function initWebSocket(httpServer: HttpServer) {
   io = new Server(httpServer, {
-    cors: { origin: config.clientUrl, credentials: true },
+    cors: {
+      origin: config.serveClient
+        ? (origin, cb) => cb(null, origin ?? config.clientUrl)
+        : config.clientUrl,
+      credentials: true,
+    },
   });
 
   io.use((socket, next) => {

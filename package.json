@@ -16,9 +16,19 @@
     "go2rtc:install": "node scripts/install-go2rtc.mjs",
     "setup:face": "bash scripts/setup-face-python.sh",
     "setup:face:win": "scripts\\setup-face-python.bat",
-    "setup:win": "scripts\\setup-windows.bat"
+    "setup:win": "scripts\\setup-windows.bat",
+    "start:edge": "npm run build && npm run start:edge:server -w server",
+    "start:edge:win": "scripts\\start-company-edge.bat",
+    "edge:gui": "python scripts/company-edge-gui/app.py",
+    "edge:gui:build": "scripts\\company-edge-gui\\build-windows.bat"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
+  },
+  "optionalDependencies": {
+    "@esbuild/darwin-arm64": "^0.28.0",
+    "@esbuild/darwin-x64": "^0.28.0",
+    "@esbuild/win32-x64": "^0.28.0",
+    "@esbuild/linux-x64": "^0.28.0"
   }
 }

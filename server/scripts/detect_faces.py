@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-CCTV detection: YOLOv8 persons + MediaPipe (full-range) + CNN/HOG faces.
-Faces are detected inside person crops first for alignment; persons without a face
-in the upper body are dropped unless confidence is very high.
+CCTV detection: YOLOv8 (person + scene objects) + MediaPipe + CNN/HOG faces.
+Classifies chairs, TVs, laptops, etc. Filters faces on screens to reduce false "person" tags.
 """
 from __future__ import annotations
 
@@ -26,19 +25,38 @@ except ImportError as e:
     sys.exit(1)
 
 MAX_SIDE = int(os.environ.get("FACE_DETECT_MAX_SIDE", "1920"))
-MIN_FACE_PX = int(os.environ.get("FACE_MIN_FACE_PX", "20"))
+MIN_FACE_PX = int(os.environ.get("FACE_MIN_FACE_PX", "18"))
+FACE_DETECT_UPSAMPLES = [
+    int(x)
+    for x in os.environ.get("FACE_DETECT_UPSAMPLES", "0,1,2").split(",")
+    if x.strip().isdigit()
+] or [0, 1, 2]
 MIN_FACE_AREA = float(os.environ.get("FACE_MIN_AREA_FRAC", "0.0003"))
 MAX_FACE_AREA = float(os.environ.get("FACE_MAX_AREA_FRAC", "0.35"))
 MIN_PERSON_AREA = float(os.environ.get("FACE_MIN_PERSON_AREA_FRAC", "0.003"))
-YOLO_CONF = float(os.environ.get("FACE_YOLO_CONF", "0.28"))
+YOLO_CONF = float(os.environ.get("FACE_YOLO_CONF", "0.38"))
 YOLO_IMGSZ = int(os.environ.get("FACE_YOLO_IMGSZ", "960"))
+OBJECT_CONF = float(os.environ.get("FACE_OBJECT_CONF", "0.42"))
+SCENE_OBJECTS_ENABLED = os.environ.get("FACE_SCENE_OBJECTS", "false").lower() == "true"
+FURNITURE_FILTER = os.environ.get("FACE_FURNITURE_FILTER", "true").lower() != "false"
 MP_CONF = float(os.environ.get("FACE_MEDIAPIPE_CONF", "0.28"))
 CNN_IF_FEWER_FACES = int(os.environ.get("FACE_CNN_IF_FEWER_THAN", "2"))
 PERSON_MIN_ASPECT = float(os.environ.get("FACE_PERSON_MIN_ASPECT", "0.65"))
-PERSON_KEEP_NO_FACE_CONF = float(os.environ.get("FACE_PERSON_KEEP_NO_FACE_CONF", "0.5"))
+PERSON_KEEP_NO_FACE_CONF = float(os.environ.get("FACE_PERSON_KEEP_NO_FACE_CONF", "0.72"))
+PERSON_MAX_WIDTH_RATIO = float(os.environ.get("FACE_PERSON_MAX_WIDTH_RATIO", "0.55"))
 PERSON_ENABLED = os.environ.get("FACE_PERSON_DETECT", "true").lower() != "false"
-MP_DEFAULT = "false" if sys.platform == "darwin" else "true"
-MP_ENABLED = os.environ.get("FACE_MEDIAPIPE_ENABLED", MP_DEFAULT).lower() != "false"
+MP_ENABLED = os.environ.get("FACE_MEDIAPIPE_ENABLED", "true").lower() != "false"
+CHAIR_MAX_ASPECT = float(os.environ.get("FACE_CHAIR_MAX_ASPECT", "0.78"))
+OBJECT_MERGE_IOU = float(os.environ.get("FACE_OBJECT_MERGE_IOU", "0.45"))
+FURNITURE_IOU_MIN = float(os.environ.get("FACE_FURNITURE_IOU", "0.12"))
+PERSON_FURNITURE_IOU = float(os.environ.get("FACE_PERSON_FURNITURE_IOU", "0.28"))
+FACE_PERSON_IOU_MIN = float(os.environ.get("FACE_PERSON_IOU", "0.08"))
+FACE_MIN_ASPECT = float(os.environ.get("FACE_MIN_ASPECT", "0.62"))
+FACE_MAX_ASPECT = float(os.environ.get("FACE_MAX_ASPECT", "1.45"))
+GLOBAL_HOG_MIN_SCORE = float(os.environ.get("FACE_GLOBAL_HOG_MIN", "0.58"))
+GLOBAL_MP_MIN_SCORE = float(os.environ.get("FACE_GLOBAL_MP_MIN", "0.45"))
+FURNITURE_CLASSES = frozenset({"chair", "couch", "dining_table"})
+YOLO_FILTER_CLASS_IDS = (0, 56, 57, 60)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.environ.get("FACE_MODELS_DIR", os.path.join(SCRIPT_DIR, "..", "models"))
@@ -52,6 +70,19 @@ MP_MODEL_URL = os.environ.get(
     "https://storage.googleapis.com/mediapipe-models/face_detector/"
     "blaze_face_full_range/float16/1/blaze_face_full_range.tflite",
 )
+
+# COCO classes we show on the live overlay (person handled via face pipeline).
+SCENE_CLASS_IDS: dict[int, str] = {
+    0: "person",
+    56: "chair",
+    57: "couch",
+    60: "dining_table",
+    62: "tv",
+    63: "laptop",
+    67: "cell_phone",
+    73: "book",
+}
+SCREEN_OBJECT_CLASSES = frozenset({"tv", "laptop", "cell_phone", "keyboard", "mouse"})
 
 _yolo = None
 _mp_detector = None
@@ -140,41 +171,240 @@ def get_mp_detector():
     return _mp_detector
 
 
-def yolo_person_boxes(image: np.ndarray) -> list[tuple[tuple, float]]:
-    if not PERSON_ENABLED:
-        return []
-    img_h, img_w = image.shape[:2]
-    try:
-        results = get_yolo().predict(image, classes=[0], conf=YOLO_CONF, verbose=False, imgsz=YOLO_IMGSZ)
-    except Exception:
-        return []
+def yolo_scene_detections(
+    image: np.ndarray,
+) -> tuple[list[tuple[tuple, float]], list[dict], list[dict]]:
+    """Returns (person_boxes, display_objects, furniture_for_filter) from one YOLO pass."""
+    persons: list[tuple[tuple, float]] = []
+    objects: list[dict] = []
+    furniture: list[dict] = []
+    if not PERSON_ENABLED and not SCENE_OBJECTS_ENABLED and not FURNITURE_FILTER:
+        return persons, objects, furniture
 
-    boxes, scores = [], []
+    img_h, img_w = image.shape[:2]
+    class_ids = sorted(
+        set(
+            (list(SCENE_CLASS_IDS.keys()) if SCENE_OBJECTS_ENABLED else [])
+            + ([0] if PERSON_ENABLED else [])
+            + (list(YOLO_FILTER_CLASS_IDS[1:]) if FURNITURE_FILTER else [])
+        )
+    )
+    if not class_ids:
+        return persons, objects, furniture
+    try:
+        results = get_yolo().predict(
+            image,
+            classes=class_ids,
+            conf=min(YOLO_CONF, OBJECT_CONF) * 0.85,
+            verbose=False,
+            imgsz=YOLO_IMGSZ,
+        )
+    except Exception:
+        return persons, objects, furniture
+
+    person_boxes, person_scores = [], []
+    obj_boxes: list[tuple] = []
+    obj_scores: list[float] = []
+    obj_meta: list[dict] = []
+    furn_boxes: list[tuple] = []
+    furn_scores: list[float] = []
+    furn_meta: list[dict] = []
+
     for r in results:
         if r.boxes is None:
             continue
         for box in r.boxes:
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            cls_id = int(box.cls[0])
+            label = SCENE_CLASS_IDS.get(cls_id)
+            if not label:
+                continue
             conf = float(box.conf[0])
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
             w, h = x2 - x1, y2 - y1
-            if w < 36 or h < 70:
+            loc = (int(y1), int(x2), int(y2), int(x1))
+
+            if label == "person":
+                if not PERSON_ENABLED or conf < YOLO_CONF:
+                    continue
+                if w < 36 or h < 70:
+                    continue
+                if (w * h) / (img_w * img_h) < MIN_PERSON_AREA:
+                    continue
+                if h / max(w, 1) < PERSON_MIN_ASPECT:
+                    continue
+                if w / max(img_w, 1) > PERSON_MAX_WIDTH_RATIO:
+                    continue
+                person_boxes.append(loc)
+                person_scores.append(conf)
+            elif label in FURNITURE_CLASSES and FURNITURE_FILTER:
+                furn_conf = min(OBJECT_CONF, YOLO_CONF) * 0.82
+                if conf < furn_conf:
+                    continue
+                refined = refine_object_class(label, loc)
+                furn_boxes.append(loc)
+                furn_scores.append(conf)
+                furn_meta.append({"class": refined, "classId": cls_id, "score": round(conf, 3)})
+            else:
+                if not SCENE_OBJECTS_ENABLED or conf < OBJECT_CONF:
+                    continue
+                if (w * h) / (img_w * img_h) < 0.001:
+                    continue
+                obj_boxes.append(loc)
+                obj_scores.append(conf)
+                obj_meta.append({"class": label, "classId": cls_id, "score": round(conf, 3)})
+
+    for idx in nms_boxes(person_boxes, person_scores, 0.5):
+        persons.append((person_boxes[idx], person_scores[idx]))
+
+    for idx in nms_boxes(furn_boxes, furn_scores, 0.45):
+        meta = furn_meta[idx]
+        meta["loc"] = furn_boxes[idx]
+        furniture.append(meta)
+
+    for idx in nms_boxes(obj_boxes, obj_scores, 0.45):
+        meta = obj_meta[idx]
+        meta["loc"] = obj_boxes[idx]
+        objects.append(meta)
+
+    return persons, objects, furniture
+
+
+def face_on_screen_object(face_bbox: dict, scene_objects: list[dict]) -> bool:
+    cx = face_bbox["x"] + face_bbox["width"] / 2
+    cy = face_bbox["y"] + face_bbox["height"] / 2
+    for obj in scene_objects:
+        if obj.get("class") not in SCREEN_OBJECT_CLASSES:
+            continue
+        b = obj["bbox"]
+        if b["x"] <= cx <= b["x"] + b["width"] and b["y"] <= cy <= b["y"] + b["height"]:
+            return True
+    return False
+
+
+def person_overlaps_screen_object(person_loc: tuple, scene_objects: list[dict]) -> bool:
+    for obj in scene_objects:
+        if obj.get("class") not in SCREEN_OBJECT_CLASSES:
+            continue
+        if iou(person_loc, obj["loc"]) > 0.2:
+            return True
+    return False
+
+
+def person_overlaps_furniture(person_loc: tuple, furniture: list[dict]) -> bool:
+    best = 0.0
+    for item in furniture:
+        best = max(best, iou(person_loc, item["loc"]))
+    return best >= PERSON_FURNITURE_IOU
+
+
+def face_loc_on_furniture(face_loc: tuple, furniture: list[dict]) -> bool:
+    if not furniture:
+        return False
+    ft, fr, fb, fl = face_loc
+    cx, cy = (fl + fr) / 2, (ft + fb) / 2
+    for item in furniture:
+        top, right, bottom, left = item["loc"]
+        pad_x = int((right - left) * 0.1)
+        pad_y = int((bottom - top) * 0.1)
+        if (
+            left - pad_x <= cx <= right + pad_x
+            and top - pad_y <= cy <= bottom + pad_y
+        ):
+            return True
+        if iou(face_loc, item["loc"]) > FURNITURE_IOU_MIN:
+            return True
+    return False
+
+
+def face_overlaps_person_box(face_loc: tuple, person_boxes: list[tuple[tuple, float]]) -> bool:
+    if not person_boxes:
+        return False
+    for loc, _ in person_boxes:
+        if iou(face_loc, loc) > FACE_PERSON_IOU_MIN:
+            return True
+    return False
+
+
+def face_shape_ok(face_loc: tuple) -> bool:
+    ft, fr, fb, fl = face_loc
+    w, h = fr - fl, fb - ft
+    if w < MIN_FACE_PX or h < MIN_FACE_PX:
+        return False
+    aspect = h / max(w, 1)
+    return FACE_MIN_ASPECT <= aspect <= FACE_MAX_ASPECT
+
+
+def accept_global_face(
+    score: float,
+    loc: tuple,
+    source: str,
+    person_boxes: list[tuple[tuple, float]],
+    furniture: list[dict],
+) -> bool:
+    if face_loc_on_furniture(loc, furniture):
+        return False
+    if not face_shape_ok(loc):
+        return False
+    if person_boxes:
+        if not face_overlaps_person_box(loc, person_boxes):
+            return False
+        if source == "hog" and score < GLOBAL_HOG_MIN_SCORE:
+            return False
+        return True
+    # No YOLO person in frame — reject HOG/CNN texture false positives (bean bags, posters).
+    if source != "mediapipe" or score < GLOBAL_MP_MIN_SCORE:
+        return False
+    return True
+
+
+def refine_object_class(label: str, loc: tuple) -> str:
+    """Wide flat boxes labeled chair → couch (bean bags, lounge seats)."""
+    top, right, bottom, left = loc
+    w, h = right - left, bottom - top
+    aspect = h / max(w, 1)
+    if label == "chair" and aspect < CHAIR_MAX_ASPECT:
+        return "couch"
+    return label
+
+
+def merge_overlapping_objects(objects: list[dict]) -> list[dict]:
+    """One label per monitor cluster (tv beats laptop when both fire)."""
+    screen_priority = {"tv": 3, "laptop": 2, "cell_phone": 1}
+    screen_classes = set(screen_priority.keys())
+    used: set[int] = set()
+    out: list[dict] = []
+
+    for i, a in enumerate(objects):
+        if i in used:
+            continue
+        if a["class"] not in screen_classes:
+            out.append(a)
+            continue
+        cluster = [a]
+        used.add(i)
+        for j, b in enumerate(objects):
+            if j in used or b["class"] not in screen_classes:
                 continue
-            if (w * h) / (img_w * img_h) < MIN_PERSON_AREA:
-                continue
-            if h / max(w, 1) < PERSON_MIN_ASPECT:
-                continue
-            boxes.append((int(y1), int(x2), int(y2), int(x1)))
-            scores.append(conf)
-    out = []
-    for idx in nms_boxes(boxes, scores, 0.5):
-        out.append((boxes[idx], scores[idx]))
+            ba, bb = a["bbox"], b["bbox"]
+            al = (int(ba["y"]), int(ba["x"] + ba["width"]), int(ba["y"] + ba["height"]), int(ba["x"]))
+            bl = (int(bb["y"]), int(bb["x"] + bb["width"]), int(bb["y"] + bb["height"]), int(bb["x"]))
+            if iou(al, bl) >= OBJECT_MERGE_IOU:
+                cluster.append(b)
+                used.add(j)
+        best = max(cluster, key=lambda o: (screen_priority.get(o["class"], 0), o["score"]))
+        out.append(best)
     return out
 
 
 def person_shape_ok(top: int, right: int, bottom: int, left: int) -> bool:
     w, h = right - left, bottom - top
     ratio = h / max(w, 1)
-    return PERSON_MIN_ASPECT <= ratio <= 6.5
+    if ratio < PERSON_MIN_ASPECT or ratio > 6.5:
+        return False
+    # Wide flat boxes are often bean bags / lounge seats mis-tagged as person.
+    if ratio < 1.08 and w >= 72:
+        return False
+    return True
 
 
 def mp_faces_in_image(rgb: np.ndarray) -> list[tuple[float, tuple]]:
@@ -213,7 +443,7 @@ def mp_faces_in_image(rgb: np.ndarray) -> list[tuple[float, tuple]]:
 def hog_cnn_faces(rgb: np.ndarray) -> list[tuple[float, tuple, str]]:
     img_h, img_w = rgb.shape[:2]
     found: list[tuple[float, tuple, str]] = []
-    for ups in (0, 1):
+    for ups in FACE_DETECT_UPSAMPLES:
         for loc in face_recognition.face_locations(rgb, model="hog", number_of_times_to_upsample=ups):
             t, r, b, l = loc
             w, h = r - l, b - t
@@ -251,7 +481,7 @@ def face_in_upper_person(face_loc: tuple, person_loc: tuple) -> bool:
     pt, pr, pb, pl = person_loc
     ft, fr, fb, fl = face_loc
     face_cy = (ft + fb) / 2
-    person_mid_y = pt + (pb - pt) * 0.72
+    person_mid_y = pt + (pb - pt) * 0.78
     horiz_ok = max(pl, fl - 20) <= min(pr, fr + 20)
     return horiz_ok and ft >= pt - 10 and face_cy <= person_mid_y
 
@@ -277,8 +507,27 @@ def detect(path: str) -> dict:
     faces_out: list[dict] = []
     used_face_locs: list[tuple] = []
 
-    for (top, right, bottom, left), conf in yolo_person_boxes(image):
+    person_boxes, scene_raw, furniture_raw = yolo_scene_detections(image)
+    objects_out: list[dict] = []
+    for obj in scene_raw:
+        top, right, bottom, left = obj["loc"]
+        label = refine_object_class(obj["class"], obj["loc"])
+        objects_out.append(
+            {
+                "class": label,
+                "classId": obj["classId"],
+                "score": obj["score"],
+                "bbox": loc_to_bbox_dict(top, right, bottom, left, img_w, img_h, orig_w, orig_h),
+            }
+        )
+    objects_out = merge_overlapping_objects(objects_out)
+
+    for (top, right, bottom, left), conf in person_boxes:
         if not person_shape_ok(top, right, bottom, left):
+            continue
+        if person_overlaps_furniture((top, right, bottom, left), furniture_raw):
+            continue
+        if person_overlaps_screen_object((top, right, bottom, left), scene_raw):
             continue
         pad_x = int((right - left) * 0.06)
         pad_y = int((bottom - top) * 0.04)
@@ -302,7 +551,7 @@ def detect(path: str) -> dict:
             used_face_locs.append(glob)
             person_faces.append((score, glob, source, enc))
 
-        if person_faces or conf >= PERSON_KEEP_NO_FACE_CONF:
+        if person_faces:
             persons_out.append(
                 {
                     "score": round(conf, 3),
@@ -312,28 +561,74 @@ def detect(path: str) -> dict:
             )
             for score, glob, source, enc in person_faces:
                 gt, gr, gb, gl = glob
+                fbbox = loc_to_bbox_dict(gt, gr, gb, gl, img_w, img_h, orig_w, orig_h)
+                if face_on_screen_object(fbbox, objects_out):
+                    continue
+                if face_loc_on_furniture(glob, furniture_raw):
+                    continue
+                if not face_shape_ok(glob):
+                    continue
                 faces_out.append(
                     {
                         "encoding": enc.tolist(),
                         "score": round(max(score, 0.5), 3),
                         "source": source,
-                        "bbox": loc_to_bbox_dict(gt, gr, gb, gl, img_w, img_h, orig_w, orig_h),
+                        "bbox": fbbox,
                     }
                 )
 
-    # Global pass — catch people YOLO missed (e.g. partial / walking)
+    # Extra pass inside each YOLO person crop (profile / small faces at desks)
+    if not faces_out and person_boxes:
+        for (top, right, bottom, left), _conf in person_boxes:
+            pad_x = int((right - left) * 0.08)
+            pad_y = int((bottom - top) * 0.06)
+            crop = image[
+                max(0, top - pad_y) : min(img_h, bottom + pad_y),
+                max(0, left - pad_x) : min(img_w, right + pad_x),
+            ]
+            if crop.size == 0:
+                continue
+            for score, loc, source, enc in encode_faces(crop, collect_faces_in_rgb(crop)):
+                t, r, b, l = loc
+                gt, gr, gb, gl = t + max(0, top - pad_y), r + max(0, left - pad_x), b + max(0, top - pad_y), l + max(0, left - pad_x)
+                glob = (gt, gr, gb, gl)
+                if any(iou(glob, u) > 0.35 for u in used_face_locs):
+                    continue
+                fbbox = loc_to_bbox_dict(gt, gr, gb, gl, img_w, img_h, orig_w, orig_h)
+                if face_on_screen_object(fbbox, objects_out):
+                    continue
+                if face_loc_on_furniture(glob, furniture_raw):
+                    continue
+                if not face_shape_ok(glob):
+                    continue
+                used_face_locs.append(glob)
+                faces_out.append(
+                    {
+                        "encoding": enc.tolist(),
+                        "score": round(max(score, 0.5), 3),
+                        "source": source,
+                        "bbox": fbbox,
+                    }
+                )
+
+    # Global pass — catch people YOLO missed (e.g. partial / walking); skip furniture texture.
     global_merged = collect_faces_in_rgb(image)
     global_encoded = encode_faces(image, global_merged)
     for score, loc, source, enc in global_encoded:
         if any(iou(loc, used) > 0.35 for used in used_face_locs):
             continue
+        if not accept_global_face(score, loc, source, person_boxes, furniture_raw):
+            continue
         t, r, b, l = loc
+        fbbox = loc_to_bbox_dict(t, r, b, l, img_w, img_h, orig_w, orig_h)
+        if face_on_screen_object(fbbox, objects_out):
+            continue
         faces_out.append(
             {
                 "encoding": enc.tolist(),
                 "score": round(max(score, 0.5), 3),
                 "source": source,
-                "bbox": loc_to_bbox_dict(t, r, b, l, img_w, img_h, orig_w, orig_h),
+                "bbox": fbbox,
             }
         )
     # NMS on faces (YOLO crop + global can duplicate)
@@ -364,7 +659,13 @@ def detect(path: str) -> dict:
         keep = nms_boxes(boxes, scores, 0.5)
         persons_out = [persons_out[i] for i in keep]
 
-    return {"faces": faces_out, "persons": persons_out, "imageWidth": orig_w, "imageHeight": orig_h}
+    return {
+        "faces": faces_out,
+        "persons": persons_out,
+        "objects": objects_out,
+        "imageWidth": orig_w,
+        "imageHeight": orig_h,
+    }
 
 
 def main():

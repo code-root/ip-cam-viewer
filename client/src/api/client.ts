@@ -207,6 +207,17 @@ export const streamsApi = {
   health: (cameraId: string) => api<{ online: boolean }>(`/streams/${cameraId}/health`),
 };
 
+export type FaceAnalysisMode = 'people_only' | 'people_and_objects';
+
+export const systemApi = {
+  getFaceAnalysis: () => api<{ mode: FaceAnalysisMode }>('/system/face-analysis'),
+  setFaceAnalysis: (mode: FaceAnalysisMode) =>
+    api<{ mode: FaceAnalysisMode; ok: boolean }>('/system/face-analysis', {
+      method: 'PUT',
+      body: JSON.stringify({ mode }),
+    }),
+};
+
 export const recordingsApi = {
   list: (cameraId?: string) => api<{ recordings: Array<{ id: string; filename: string; startedAt: string; camera: { name: string } }> }>(
     `/recordings${cameraId ? `?cameraId=${cameraId}` : ''}`

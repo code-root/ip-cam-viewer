@@ -47,7 +47,8 @@ export function emitLiveFrame(
   frameWidth: number,
   frameHeight: number,
   items: Array<{
-    detectionType: 'face' | 'person';
+    detectionType: 'face' | 'person' | 'object';
+    objectClass?: string;
     bbox: { x: number; y: number; width: number; height: number };
     confidence: number;
     employeeId?: string;

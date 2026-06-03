@@ -159,6 +159,22 @@ model Employee {
   faceProfiles FaceProfile[]
   movementLogs MovementLog[]
   faceEvents   FaceDetectionEvent[]
+  globalFingerprints GlobalFaceFingerprint[]
+}
+
+/** Persistent face fingerprint — links the same person across cameras (survives server restart). */
+model GlobalFaceFingerprint {
+  id             String    @id @default(uuid())
+  globalTrackId  String    @unique
+  globalTrackNum Int
+  descriptor     String
+  employeeId     String?
+  employee       Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  camerasVisited String    @default("[]")
+  sampleCount    Int       @default(1)
+  lastCameraId   String?
+  lastSeenAt     DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
 }
 
 model FaceProfile {

@@ -9,14 +9,38 @@ export type Go2rtcStreamCallbacks = {
 };
 
 /** Target live edge buffer (seconds) for MSE fallback — minimal = lower latency. */
-const MSE_LIVE_BUFFER_SEC = 0.35;
-const WS_CONNECT_TIMEOUT_MS = 2500;
-const RECONNECT_MS = 800;
+const MSE_LIVE_BUFFER_SEC = 0.12;
+/** If playback lags behind live edge by more than this, jump forward (WebRTC/MSE). */
+const LIVE_EDGE_MAX_LAG_SEC = 0.25;
+const LIVE_EDGE_SYNC_MS = 400;
+const WS_CONNECT_TIMEOUT_MS = 8000;
+const RECONNECT_BASE_MS = 2000;
+const RECONNECT_MAX_MS = 30000;
+const FREEZE_CAPTURE_MIN_MS = 4000;
+const MJPEG_FRAME_MIN_MS = 250;
+
+const freezeLastCapture = new WeakMap<HTMLImageElement, number>();
+const freezeBlobUrl = new WeakMap<HTMLImageElement, string>();
+
+/** LAN: skip STUN for faster WebRTC setup; use STUN on remote hosts. */
+function iceServersForHost(): RTCIceServer[] {
+  const h = location.hostname;
+  if (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    /^192\.168\./.test(h) ||
+    /^10\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+  ) {
+    return [];
+  }
+  return [{ urls: ['stun:stun.l.google.com:19302'] }];
+}
 
 function resolveGo2rtcWsBase(): string {
   const env = import.meta.env.VITE_GO2RTC_WS as string | undefined;
   if (env) return env.replace(/\/$/, '');
-  if (import.meta.env.DEV) return 'ws://127.0.0.1:1984';
+  // Same host as the UI (Vite /go2rtc proxy in dev, reverse proxy in prod).
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}/go2rtc`;
 }
@@ -27,12 +51,15 @@ export class Go2rtcStream {
   private mseCodecs = '';
   private ondata: ((data: ArrayBuffer) => void) | null = null;
   private onmessage: Record<string, (msg: { type: string; value: string }) => void> = {};
-  private connectTs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private liveViaRtc = false;
   private wsEverOpened = false;
+  private failCount = 0;
+  private mjpegLastAt = 0;
+  private mjpegBlobUrl: string | null = null;
+  private liveEdgeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly video: HTMLVideoElement,
@@ -42,31 +69,54 @@ export class Go2rtcStream {
 
   start() {
     this.stopped = false;
+    this.failCount = 0;
     this.connect();
   }
 
   stop() {
     this.stopped = true;
     this.liveViaRtc = false;
+    this.failCount = 0;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.wsConnectTimer) clearTimeout(this.wsConnectTimer);
+    if (this.mjpegBlobUrl) {
+      URL.revokeObjectURL(this.mjpegBlobUrl);
+      this.mjpegBlobUrl = null;
+    }
+    this.stopLiveEdgeSync();
     this.disconnect();
   }
 
-  /** Capture current video frame to an <img> for freeze-on-disconnect. */
-  static captureToImage(video: HTMLVideoElement, target: HTMLImageElement) {
+  /** Capture current video frame to freeze <img> (throttled; blob URL, not base64). */
+  static captureToImage(
+    video: HTMLVideoElement,
+    target: HTMLImageElement,
+    options?: { force?: boolean }
+  ) {
     if (video.videoWidth === 0 || video.videoHeight === 0) return;
+    const now = Date.now();
+    const last = freezeLastCapture.get(target) ?? 0;
+    if (!options?.force && now - last < FREEZE_CAPTURE_MIN_MS) return;
+
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.drawImage(video, 0, 0);
-    try {
-      target.src = canvas.toDataURL('image/jpeg', 0.88);
-    } catch {
-      /* ignore */
-    }
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        const prev = freezeBlobUrl.get(target);
+        if (prev) URL.revokeObjectURL(prev);
+        const url = URL.createObjectURL(blob);
+        freezeBlobUrl.set(target, url);
+        freezeLastCapture.set(target, Date.now());
+        target.src = url;
+      },
+      'image/jpeg',
+      0.82
+    );
   }
 
   private wsUrl() {
@@ -76,7 +126,6 @@ export class Go2rtcStream {
   private connect() {
     if (this.stopped) return;
     if (this.ws) return;
-    this.connectTs = Date.now();
     this.wsEverOpened = false;
     const ws = new WebSocket(this.wsUrl());
     ws.binaryType = 'arraybuffer';
@@ -84,21 +133,32 @@ export class Go2rtcStream {
 
     this.wsConnectTimer = setTimeout(() => {
       if (!this.wsEverOpened && !this.stopped) {
-        // WebRTC path unavailable: keep last frame and mark offline.
-        Go2rtcStream.captureToImage(this.video, this.freezeTarget());
-        this.callbacks.onOffline?.();
+        ws.close();
       }
     }, WS_CONNECT_TIMEOUT_MS);
 
     ws.addEventListener('open', () => {
       this.wsEverOpened = true;
+      this.failCount = 0;
       if (this.wsConnectTimer) clearTimeout(this.wsConnectTimer);
       this.onWsOpen();
     });
     ws.addEventListener('close', () => this.onWsClose());
-    ws.addEventListener('error', () => {
-      this.callbacks.onOffline?.();
-    });
+    ws.addEventListener('error', () => ws.close());
+  }
+
+  private scheduleReconnect() {
+    if (this.stopped || this.reconnectTimer) return;
+    this.failCount += 1;
+    const delay = Math.min(
+      RECONNECT_BASE_MS * 2 ** (this.failCount - 1),
+      RECONNECT_MAX_MS
+    );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.disconnectPc();
+      this.connect();
+    }, delay);
   }
 
   private send(msg: object) {
@@ -147,15 +207,11 @@ export class Go2rtcStream {
 
   private onWsClose() {
     this.ws = null;
+    if (this.wsConnectTimer) clearTimeout(this.wsConnectTimer);
     if (this.stopped || this.liveViaRtc) return;
-    Go2rtcStream.captureToImage(this.video, this.freezeTarget());
+    Go2rtcStream.captureToImage(this.video, this.freezeTarget(), { force: true });
     this.callbacks.onOffline?.();
-    const delay = Math.max(RECONNECT_MS * 2 - (Date.now() - this.connectTs), RECONNECT_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.disconnectPc();
-      this.connect();
-    }, delay);
+    this.scheduleReconnect();
   }
 
   private freezeTarget(): HTMLImageElement {
@@ -185,10 +241,43 @@ export class Go2rtcStream {
     }
   }
 
+  private startLiveEdgeSync() {
+    this.stopLiveEdgeSync();
+    this.liveEdgeTimer = setInterval(() => this.syncToLiveEdge(), LIVE_EDGE_SYNC_MS);
+  }
+
+  private stopLiveEdgeSync() {
+    if (this.liveEdgeTimer) {
+      clearInterval(this.liveEdgeTimer);
+      this.liveEdgeTimer = null;
+    }
+  }
+
+  /** Keep `<video>` at the live edge (minimal glass-to-glass delay). */
+  private syncToLiveEdge() {
+    const v = this.video;
+    if (v.paused || v.readyState < 2) return;
+    const buf = v.buffered;
+    if (buf.length > 0) {
+      const end = buf.end(buf.length - 1);
+      const lag = end - v.currentTime;
+      if (lag > LIVE_EDGE_MAX_LAG_SEC) {
+        v.currentTime = Math.max(buf.start(0), end - 0.03);
+      }
+    }
+  }
+
+  private applyWebRtcLowLatency(pc: RTCPeerConnection) {
+    for (const receiver of pc.getReceivers()) {
+      const r = receiver as RTCRtpReceiver & { playoutDelayHint?: number };
+      if ('playoutDelayHint' in r) r.playoutDelayHint = 0;
+    }
+  }
+
   private async startWebRtc() {
     const pc = new RTCPeerConnection({
       bundlePolicy: 'max-bundle',
-      iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }],
+      iceServers: iceServersForHost(),
       iceCandidatePoolSize: 0,
     });
     this.pc = pc;
@@ -210,7 +299,9 @@ export class Go2rtcStream {
         this.video.style.opacity = '1';
         const freeze = this.video.parentElement?.querySelector('img.stream-freeze') as HTMLImageElement;
         if (freeze) freeze.style.opacity = '0';
+        this.applyWebRtcLowLatency(pc);
         this.applyLowLatencyVideoHints();
+        this.startLiveEdgeSync();
         void this.video.play().catch(() => {
           this.video.muted = true;
           void this.video.play();
@@ -222,16 +313,11 @@ export class Go2rtcStream {
         }
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         this.liveViaRtc = false;
-        Go2rtcStream.captureToImage(this.video, this.freezeTarget());
+        this.stopLiveEdgeSync();
+        Go2rtcStream.captureToImage(this.video, this.freezeTarget(), { force: true });
         this.callbacks.onOffline?.();
         this.disconnectPc();
-        if (!this.stopped) {
-          const delay = RECONNECT_MS;
-          this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            this.connect();
-          }, delay);
-        }
+        if (!this.stopped) this.scheduleReconnect();
       }
     });
 
@@ -246,8 +332,7 @@ export class Go2rtcStream {
     };
 
     pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
-    const offer = await pc.createOffer();
+    const offer = await pc.createOffer({ offerToReceiveAudio: false, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
     this.send({ type: 'webrtc/offer', value: offer.sdp || '' });
   }
@@ -312,6 +397,7 @@ export class Go2rtcStream {
             this.video.currentTime = Math.max(start, end - 0.05);
           }
           this.applyLowLatencyVideoHints();
+          this.startLiveEdgeSync();
           this.callbacks.onOnline?.();
         }
       });
@@ -334,12 +420,14 @@ export class Go2rtcStream {
 
   private startWsMjpeg() {
     this.ondata = (data) => {
-      const bytes = new Uint8Array(data);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const poster = 'data:image/jpeg;base64,' + btoa(binary);
+      const now = Date.now();
+      if (now - this.mjpegLastAt < MJPEG_FRAME_MIN_MS) return;
+      this.mjpegLastAt = now;
+      const blob = new Blob([data], { type: 'image/jpeg' });
+      if (this.mjpegBlobUrl) URL.revokeObjectURL(this.mjpegBlobUrl);
+      this.mjpegBlobUrl = URL.createObjectURL(blob);
       const freeze = this.freezeTarget();
-      freeze.src = poster;
+      freeze.src = this.mjpegBlobUrl;
       freeze.style.opacity = '1';
       this.video.style.opacity = '0';
       this.callbacks.onOnline?.();

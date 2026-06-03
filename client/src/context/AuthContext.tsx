@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { authApi } from '../api/client';
 import { io, Socket } from 'socket.io-client';
 
@@ -21,6 +22,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -65,6 +67,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => localStorage.clear())
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onTransfer = (payload: {
+      employeeName?: string;
+      fromCameraName?: string;
+      toCameraName?: string;
+    }) => {
+      const name = payload.employeeName ?? t('personDetected');
+      const msg = t('faceCameraTransfer', {
+        name,
+        from: payload.fromCameraName ?? '—',
+        to: payload.toCameraName ?? '—',
+      });
+      console.info('[face]', msg);
+    };
+    socket.on('face:camera_transfer', onTransfer);
+    return () => {
+      socket.off('face:camera_transfer', onTransfer);
+    };
+  }, [socket, t]);
 
   useEffect(() => {
     if (!user) return;

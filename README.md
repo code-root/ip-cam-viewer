@@ -83,6 +83,53 @@ PYTHON_BIN=.venv\Scripts\python.exe
 
 متغيرات: `FACE_SCAN_INTERVAL_SEC`, `FACE_MATCH_THRESHOLD` (أقل = أدق), `FACE_ABSENCE_CLOSE_SEC`.
 
+## تشغيل على جهاز الشركة (Windows — شبكة محلية + إنترنت)
+
+ضع المشروع على **PC داخل المكتب** متصل بنفس شبكة الكاميرات (`192.168.x.x`). السيرفر يسحب RTSP محلياً؛ الموظفون يفتحون المتصفح على عنوان الجهاز.
+
+### الإعداد (مرة واحدة)
+
+```bat
+scripts\setup-windows.bat
+```
+
+### واجهة رسومية / ملف EXE (موصى به)
+
+```bat
+scripts\company-edge-gui\run-gui.bat
+```
+
+لبناء `CompanyEdgeLauncher.exe` على Windows:
+
+```bat
+scripts\company-edge-gui\build-windows.bat
+```
+
+انسخ `dist-launcher\CompanyEdgeLauncher.exe` إلى مجلد المشروع وشغّله — أزرار: إعداد أولي، تشغيل، إيقاف، فتح المتصفح.
+
+### التشغيل من سطر الأوامر (منفذ واحد)
+
+```bat
+scripts\start-company-edge.bat
+```
+
+أو: `npm run start:edge:win`
+
+- الواجهة والـ API: `http://IP-الجهاز:3000` (يُكتشف IP تلقائياً)
+- **WebSocket** (إشعارات، تحليل الوجوه الحي): نفس المنفذ `3000` عبر `socket.io`
+- **البث المباشر**: WebRTC/MJPEG عبر `/go2rtc` (بروكسي داخلي إلى go2rtc)
+- **الذكاء الاصطناعي**: يعمل على نفس الجهاز (Python) ويقرأ لقطات من الكاميرات المحلية
+
+تشغيل تلقائي عند إقلاع Windows:
+
+```bat
+scripts\install-company-edge-service.bat
+```
+
+ملف إعدادات جاهز: انسخ `.env.company-edge.example` إلى `.env` وعدّل `JWT_SECRET`.
+
+**من خارج المكتب:** لا تفتح منفذ RTSP — استخدم VPN (Tailscale) أو نفق HTTPS إلى المنفذ `3000` فقط.
+
 ## أوامر npm مفيدة
 
 | الأمر | الوصف |
@@ -91,3 +138,5 @@ PYTHON_BIN=.venv\Scripts\python.exe
 | `npm run go2rtc:install` | تحميل go2rtc للنظام الحالي |
 | `npm run db:deploy` | تطبيق migrations (مناسب للإنتاج و Windows) |
 | `npm run setup:win` | إعداد كامل على Windows |
+| `npm run start:edge:win` | تشغيل إنتاج على جهاز الشركة (Windows) |
+| `scripts\start-company-edge.bat` | نفس الأمر — UI+API+WS على `:3000` |

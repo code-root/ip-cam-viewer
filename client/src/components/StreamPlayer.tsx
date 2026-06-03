@@ -35,8 +35,6 @@ export function StreamPlayer({
   useEffect(() => {
     const session = ++sessionRef.current;
     let cancelled = false;
-    let stallTimer: ReturnType<typeof setInterval> | undefined;
-
     async function start() {
       try {
         setError(null);
@@ -59,7 +57,6 @@ export function StreamPlayer({
           },
           onOffline: () => {
             if (session !== sessionRef.current) return;
-            Go2rtcStream.captureToImage(video, freeze);
             freeze.style.opacity = '1';
             video.style.opacity = '0';
             onStatus?.(false);
@@ -67,30 +64,11 @@ export function StreamPlayer({
         });
         playerRef.current.start();
 
-        // Periodically cache last good frame while live
-        stallTimer = setInterval(() => {
-          if (video.videoWidth > 0 && !video.paused && video.readyState >= 2) {
-            Go2rtcStream.captureToImage(video, freeze);
-          }
-        }, 800);
-
         const onPlaying = () => {
           freeze.style.opacity = '0';
           video.style.opacity = '1';
         };
         video.addEventListener('playing', onPlaying);
-
-        video.addEventListener('stalled', () => {
-          Go2rtcStream.captureToImage(video, freeze);
-          freeze.style.opacity = '1';
-        });
-
-        video.addEventListener('waiting', () => {
-          if (video.videoWidth > 0) {
-            Go2rtcStream.captureToImage(video, freeze);
-            freeze.style.opacity = '1';
-          }
-        });
       } catch (e) {
         if (!cancelled) {
           setError(String(e));
@@ -103,7 +81,6 @@ export function StreamPlayer({
 
     return () => {
       cancelled = true;
-      if (stallTimer) clearInterval(stallTimer);
       playerRef.current?.stop();
       playerRef.current = null;
       const stopSession = session;

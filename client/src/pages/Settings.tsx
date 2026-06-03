@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { camerasApi, type Camera } from '../api/client';
+import { camerasApi, systemApi, type Camera, type FaceAnalysisMode } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { TestStreamPreview } from '../components/TestStreamPreview';
 import { CameraEditForm } from '../components/CameraEditForm';
@@ -32,6 +32,23 @@ export function Settings() {
   } | null>(null);
   const [previewStream, setPreviewStream] = useState<string | null>(null);
   const canManage = user?.role === 'admin';
+  const [faceAnalysisMode, setFaceAnalysisMode] = useState<FaceAnalysisMode>('people_only');
+  const [faceAnalysisSaving, setFaceAnalysisSaving] = useState(false);
+
+  useEffect(() => {
+    if (!canManage) return;
+    systemApi.getFaceAnalysis().then((r) => setFaceAnalysisMode(r.mode)).catch(() => {});
+  }, [canManage]);
+
+  const saveFaceAnalysisMode = async (mode: FaceAnalysisMode) => {
+    setFaceAnalysisSaving(true);
+    try {
+      const r = await systemApi.setFaceAnalysis(mode);
+      setFaceAnalysisMode(r.mode);
+    } finally {
+      setFaceAnalysisSaving(false);
+    }
+  };
 
   useEffect(() => {
     setTestResult(null);
@@ -182,6 +199,42 @@ export function Settings() {
       <h2>{t('settings')}</h2>
       {canManage && (
         <>
+          <div className="card" style={{ marginBottom: '1rem' }}>
+            <h3>{t('faceAnalysisModeTitle')}</h3>
+            <p className="form-hint" style={{ marginBottom: '0.75rem' }}>
+              {t('faceAnalysisModeHint')}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="faceAnalysisMode"
+                  checked={faceAnalysisMode === 'people_only'}
+                  disabled={faceAnalysisSaving}
+                  onChange={() => void saveFaceAnalysisMode('people_only')}
+                />
+                <span>
+                  <strong>{t('faceAnalysisPeopleOnly')}</strong>
+                  <br />
+                  <span className="form-hint">{t('faceAnalysisPeopleOnlyDesc')}</span>
+                </span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="faceAnalysisMode"
+                  checked={faceAnalysisMode === 'people_and_objects'}
+                  disabled={faceAnalysisSaving}
+                  onChange={() => void saveFaceAnalysisMode('people_and_objects')}
+                />
+                <span>
+                  <strong>{t('faceAnalysisPeopleAndObjects')}</strong>
+                  <br />
+                  <span className="form-hint">{t('faceAnalysisPeopleAndObjectsDesc')}</span>
+                </span>
+              </label>
+            </div>
+          </div>
           <div className="card add-camera-card" style={{ marginBottom: '1rem' }}>
             <h3>{t('addCamera')}</h3>
             <div className="add-camera-grid">

@@ -30,6 +30,13 @@ export interface DetectedPersonBox {
   score: number;
 }
 
+export interface DetectedSceneObject {
+  class: string;
+  classId?: number;
+  bbox: { x: number; y: number; width: number; height: number };
+  score: number;
+}
+
 async function runPythonDetect(imagePath: string): Promise<{
   faces: Array<{
     encoding: number[];
@@ -37,6 +44,12 @@ async function runPythonDetect(imagePath: string): Promise<{
     bbox: { x: number; y: number; width: number; height: number };
   }>;
   persons?: Array<{
+    score?: number;
+    bbox: { x: number; y: number; width: number; height: number };
+  }>;
+  objects?: Array<{
+    class: string;
+    classId?: number;
     score?: number;
     bbox: { x: number; y: number; width: number; height: number };
   }>;
@@ -150,9 +163,15 @@ export interface DetectFrameMeta {
 
 async function detectFacesInBuffer(
   imageBuffer: Buffer
-): Promise<{ faces: DetectedFace[]; persons: DetectedPersonBox[]; meta: DetectFrameMeta }> {
+): Promise<{
+  faces: DetectedFace[];
+  persons: DetectedPersonBox[];
+  objects: DetectedSceneObject[];
+  meta: DetectFrameMeta;
+}> {
   const faces: DetectedFace[] = [];
   const persons: DetectedPersonBox[] = [];
+  const objects: DetectedSceneObject[] = [];
   let meta: DetectFrameMeta = { imageWidth: 1920, imageHeight: 1080 };
   await withTempImage(imageBuffer, async (tmp) => {
     const raw = await runPythonDetect(tmp);
@@ -177,8 +196,20 @@ async function detectFacesInBuffer(
       if (score < minPerson) continue;
       persons.push({ bbox: p.bbox, score });
     }
+    const minObject = config.faceObjectMinScore;
+    for (const o of raw.objects ?? []) {
+      const score = o.score ?? 0;
+      if (score < minObject) continue;
+      if (!o.class || !o.bbox) continue;
+      objects.push({
+        class: o.class,
+        classId: o.classId,
+        bbox: o.bbox,
+        score,
+      });
+    }
   });
-  return { faces, persons, meta };
+  return { faces, persons, objects, meta };
 }
 
 export async function extractFaceFromBuffer(imageBuffer: Buffer): Promise<FaceDescriptorResult> {
@@ -296,6 +327,7 @@ export async function detectAndMatchAll(
     faceIndex: number;
   }>;
   persons: DetectedPersonBox[];
+  objects: DetectedSceneObject[];
   meta: DetectFrameMeta;
   error?: string;
 }> {
@@ -303,13 +335,14 @@ export async function detectAndMatchAll(
     return {
       detections: [],
       persons: [],
+      objects: [],
       meta: { imageWidth: 1920, imageHeight: 1080 },
       error: getFaceLoadError() || 'Face recognition not available',
     };
   }
 
   try {
-    const { faces, persons, meta } = await detectFacesInBuffer(imageBuffer);
+    const { faces, persons, objects, meta } = await detectFacesInBuffer(imageBuffer);
     const { assignUniqueFaceMatches } = await import('./face-tracker.js');
     const unique = assignUniqueFaceMatches(
       faces.map((f) => f.descriptor),
@@ -346,13 +379,14 @@ export async function detectAndMatchAll(
         faceIndex: faceIdx,
       };
     });
-    return { detections, persons, meta };
+    return { detections, persons, objects, meta };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[face] detectAndMatchAll failed:', msg);
     return {
       detections: [],
       persons: [],
+      objects: [],
       meta: { imageWidth: 1920, imageHeight: 1080 },
       error: msg,
     };

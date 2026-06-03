@@ -5,11 +5,13 @@ import path from 'path';
 import fs from 'fs/promises';
 import cron from 'node-cron';
 import { config } from './config.js';
+import { mountEdgeClient } from './lib/edge-server.js';
 import { faceSetupCommand, portInUseHint } from './lib/platform.js';
 import { startGo2rtc, syncCameraStreams, stopGo2rtc } from './streams/go2rtc.js';
 import { prisma } from './lib/prisma.js';
 import { initWebSocket, simulateMotionEvents } from './ws/hub.js';
 import { runScheduledSnapshots } from './routes/snapshots.js';
+import { loadFaceAnalysisSettings } from './face/analysis-settings.js';
 import { startFaceScanner, stopFaceScanner } from './face/scanner.js';
 import { loadFaceModels } from './face/service.js';
 import employeeRoutes from './routes/employees.js';
@@ -37,7 +39,14 @@ process.on('uncaughtException', (err) => {
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: config.clientUrl, credentials: true }));
+app.use(
+  cors({
+    origin: config.serveClient
+      ? (origin, cb) => cb(null, origin ?? config.clientUrl)
+      : config.clientUrl,
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/api/health', (_req, res) => {
@@ -59,12 +68,13 @@ app.use('/api/employees', employeeRoutes);
 
 app.use('/uploads/floor-plans', express.static(path.join(config.root, 'data/floor-plans')));
 
-app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error('[api] unhandled error:', err);
-  if (!res.headersSent) {
-    res.status(500).json({ error: String(err) });
-  }
-});
+async function mountEdgeStack() {
+  if (!config.serveClient) return;
+  const { mountGo2rtcHttpProxy, attachGo2rtcWsProxy } = await import('./lib/go2rtc-proxy.js');
+  mountGo2rtcHttpProxy(app);
+  mountEdgeClient(app);
+  attachGo2rtcWsProxy(server);
+}
 
 async function bootstrap() {
   await fs.mkdir(path.join(config.root, 'data'), { recursive: true });
@@ -72,9 +82,20 @@ async function bootstrap() {
   await fs.mkdir(config.snapshotsPath, { recursive: true });
   await fs.mkdir(config.facesPath, { recursive: true });
 
+  const analysisMode = await loadFaceAnalysisSettings();
+  console.log('[face] Analysis mode:', analysisMode);
+
   const cameras = await prisma.camera.findMany({ where: { enabled: true } });
   await syncCameraStreams(cameras);
   await startGo2rtc();
+  await mountEdgeStack();
+
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[api] unhandled error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
 
   initWebSocket(server);
   simulateMotionEvents();
@@ -107,8 +128,15 @@ async function bootstrap() {
   });
 
   server.listen(config.port, config.host, () => {
-    console.log(`API http://${config.host}:${config.port}`);
-    console.log(`Client ${config.clientUrl}`);
+    const mode = config.serveClient ? 'edge (UI+API+WS)' : 'api';
+    console.log(`[server] Mode: ${mode}`);
+    console.log(`[server] API http://${config.host}:${config.port}`);
+    if (config.serveClient) {
+      console.log(`[server] Open in browser: ${config.clientUrl}`);
+      console.log('[server] Cameras must be reachable from THIS PC (same LAN RTSP).');
+    } else {
+      console.log(`[server] Dev client: ${config.clientUrl}`);
+    }
   });
 }
 

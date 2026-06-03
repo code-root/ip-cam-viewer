@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
+import { initSmoothTrack, stepSmoothDisplay, updateSmoothTarget, type Bbox } from '../lib/smoothBbox';
 import './FaceLiveOverlay.css';
 
 export interface LiveDetection {
   id: string;
-  kind: 'face' | 'person';
+  kind: 'face' | 'person' | 'object';
+  objectClass?: string;
   employeeName: string;
   trackId?: string;
   globalTrackId?: string;
   isUnknown: boolean;
   confidence: number;
-  bbox: { x: number; y: number; width: number; height: number };
+  bbox: Bbox;
   frameWidth: number;
   frameHeight: number;
   at: number;
@@ -19,18 +21,20 @@ export interface LiveDetection {
 
 type ScanState = 'idle' | 'scanning' | 'ok' | 'error' | 'unavailable';
 
+type SmoothItem = LiveDetection & { smoothKey: string };
+
 interface Props {
   cameraId: string;
 }
 
-function cellKey(bbox: LiveDetection['bbox'], fw: number, fh: number): string {
+function cellKey(bbox: Bbox, fw: number, fh: number): string {
   const cx = Math.round(((bbox.x + bbox.width / 2) / fw) * 16);
   const cy = Math.round(((bbox.y + bbox.height / 2) / fh) * 16);
   return `${cx}_${cy}`;
 }
 
 function mapBboxToOverlay(
-  bbox: LiveDetection['bbox'],
+  bbox: Bbox,
   frameW: number,
   frameH: number,
   videoW: number,
@@ -62,21 +66,27 @@ export function FaceLiveOverlay({ cameraId }: Props) {
   const { t } = useTranslation();
   const { socket } = useAuth();
   const rootRef = useRef<HTMLDivElement>(null);
-  const [items, setItems] = useState<LiveDetection[]>([]);
+  const smoothRef = useRef(
+    new Map<string, { meta: Omit<LiveDetection, 'bbox'>; motion: ReturnType<typeof initSmoothTrack> }>()
+  );
+  const [displayItems, setDisplayItems] = useState<SmoothItem[]>([]);
   const [scanState, setScanState] = useState<ScanState>('idle');
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [layout, setLayout] = useState({ cw: 0, ch: 0, vw: 0, vh: 0 });
+  const layoutRef = useRef(layout);
 
   const measure = useCallback(() => {
     const host = rootRef.current?.parentElement;
     const video = host?.querySelector('video');
     if (!host) return;
-    setLayout({
+    const next = {
       cw: host.clientWidth,
       ch: host.clientHeight,
       vw: video?.videoWidth ?? 0,
       vh: video?.videoHeight ?? 0,
-    });
+    };
+    layoutRef.current = next;
+    setLayout(next);
   }, []);
 
   useEffect(() => {
@@ -87,14 +97,45 @@ export function FaceLiveOverlay({ cameraId }: Props) {
     const video = host.querySelector('video');
     video?.addEventListener('loadedmetadata', measure);
     video?.addEventListener('resize', measure);
-    const iv = setInterval(measure, 1500);
     measure();
     return () => {
       ro.disconnect();
       video?.removeEventListener('loadedmetadata', measure);
       video?.removeEventListener('resize', measure);
-      clearInterval(iv);
     };
+  }, [measure]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const host = rootRef.current?.parentElement;
+      const video = host?.querySelector('video');
+      if (video && !video.paused && video.readyState >= 2) {
+        measure();
+      }
+
+      const now = performance.now();
+      const nextDisplay: SmoothItem[] = [];
+      const staleBefore = now - 3500;
+
+      for (const [key, entry] of smoothRef.current) {
+        if (entry.motion.targetAt < staleBefore) {
+          smoothRef.current.delete(key);
+          continue;
+        }
+        const bbox = stepSmoothDisplay(
+          entry.motion,
+          now,
+          entry.meta.frameWidth,
+          entry.meta.frameHeight
+        );
+        nextDisplay.push({ ...entry.meta, smoothKey: key, bbox });
+      }
+      setDisplayItems(nextDisplay);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [measure]);
 
   useEffect(() => {
@@ -105,8 +146,9 @@ export function FaceLiveOverlay({ cameraId }: Props) {
       frameWidth?: number;
       frameHeight?: number;
       items?: Array<{
-        detectionType: 'face' | 'person';
-        bbox: { x: number; y: number; width: number; height: number };
+        detectionType: 'face' | 'person' | 'object';
+        objectClass?: string;
+        bbox: Bbox;
         confidence: number;
         employeeId?: string;
         employeeName?: string;
@@ -120,49 +162,78 @@ export function FaceLiveOverlay({ cameraId }: Props) {
       if (payload.cameraId !== cameraId || !payload.items) return;
       const fw = payload.frameWidth && payload.frameWidth > 0 ? payload.frameWidth : 1920;
       const fh = payload.frameHeight && payload.frameHeight > 0 ? payload.frameHeight : 1080;
-      const now = Date.now();
-      const next: LiveDetection[] = [];
+      const now = performance.now();
+      const seen = new Set<string>();
 
       for (const it of payload.items) {
-        const kind = it.detectionType === 'person' ? 'person' : 'face';
+        const kind =
+          it.detectionType === 'object'
+            ? 'object'
+            : it.detectionType === 'person'
+              ? 'person'
+              : 'face';
         const isUnknown = Boolean(it.isUnknown);
-        if (kind === 'face' && !isUnknown && !it.employeeName && !it.globalTrackLabel && !it.trackLabel) continue;
+        if (kind === 'face' && !isUnknown && !it.employeeName && !it.globalTrackLabel && !it.trackLabel)
+          continue;
         const label =
-          it.employeeName ||
-          it.globalTrackLabel ||
-          it.trackLabel ||
-          (kind === 'person' ? t('personDetected') : t('faceUnknown'));
-        const id =
-          kind === 'person'
-            ? `p:${it.globalTrackId || it.trackId || cellKey(it.bbox, fw, fh)}`
+          kind === 'object'
+            ? t(`object.${it.objectClass}`, {
+                defaultValue: it.objectClass || t('objectUnknown'),
+              })
+            : it.employeeName ||
+              it.globalTrackLabel ||
+              it.trackLabel ||
+              (kind === 'person' ? t('personDetected') : t('faceUnknown'));
+        const stableKey =
+          kind === 'object'
+            ? `o:${it.objectClass}:${cellKey(it.bbox, fw, fh)}`
             : it.trackId
               ? `t:${it.trackId}`
               : it.globalTrackId
                 ? `g:${it.globalTrackId}`
-              : isUnknown
-                ? `u:${cellKey(it.bbox, fw, fh)}`
-                : `n:${it.employeeName}`;
-        next.push({
-          id,
+                : kind === 'person'
+                  ? `p:${cellKey(it.bbox, fw, fh)}`
+                  : isUnknown
+                    ? `u:${cellKey(it.bbox, fw, fh)}`
+                    : `n:${it.employeeName}`;
+        seen.add(stableKey);
+
+        const meta: Omit<LiveDetection, 'bbox'> = {
+          id: stableKey,
           kind,
+          objectClass: it.objectClass,
           employeeName: label,
           trackId: it.trackId,
           globalTrackId: it.globalTrackId,
           isUnknown: kind === 'face' && isUnknown,
           confidence: it.confidence,
-          bbox: it.bbox,
           frameWidth: fw,
           frameHeight: fh,
-          at: now,
-        });
+          at: Date.now(),
+        };
+
+        const existing = smoothRef.current.get(stableKey);
+        if (existing) {
+          updateSmoothTarget(existing.motion, it.bbox, now);
+          existing.meta = meta;
+        } else {
+          smoothRef.current.set(stableKey, {
+            meta,
+            motion: initSmoothTrack(it.bbox, now),
+          });
+        }
       }
-      setItems(next);
+
+      for (const key of smoothRef.current.keys()) {
+        if (!seen.has(key)) smoothRef.current.delete(key);
+      }
       measure();
     };
 
     const onClear = (payload: { cameraId: string }) => {
       if (payload.cameraId !== cameraId) return;
-      setItems([]);
+      smoothRef.current.clear();
+      setDisplayItems([]);
     };
 
     const onStatus = (payload: {
@@ -205,7 +276,7 @@ export function FaceLiveOverlay({ cameraId }: Props) {
           {statusLabel}
         </div>
       )}
-      {items.map((f) => {
+      {displayItems.map((f) => {
         const pos = mapBboxToOverlay(
           f.bbox,
           f.frameWidth,
@@ -217,20 +288,24 @@ export function FaceLiveOverlay({ cameraId }: Props) {
         );
         if (!pos) return null;
         const boxClass =
-          f.kind === 'person'
-            ? 'face-live-box face-live-box--person'
-            : f.isUnknown
-              ? 'face-live-box face-live-box--unknown'
-              : 'face-live-box';
+          f.kind === 'object'
+            ? `face-live-box face-live-box--object face-live-box--${f.objectClass || 'thing'}`
+            : f.kind === 'person'
+              ? 'face-live-box face-live-box--person'
+              : f.isUnknown
+                ? 'face-live-box face-live-box--unknown'
+                : 'face-live-box';
         const labelClass =
-          f.kind === 'person'
-            ? 'face-live-label face-live-label--person'
-            : f.isUnknown
-              ? 'face-live-label face-live-label--unknown'
-              : 'face-live-label';
+          f.kind === 'object'
+            ? `face-live-label face-live-label--object face-live-label--${f.objectClass || 'thing'}`
+            : f.kind === 'person'
+              ? 'face-live-label face-live-label--person'
+              : f.isUnknown
+                ? 'face-live-label face-live-label--unknown'
+                : 'face-live-label';
         return (
           <div
-            key={f.id}
+            key={f.smoothKey}
             className={boxClass}
             style={{
               left: `${pos.left}%`,

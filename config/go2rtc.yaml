@@ -1,21 +1,24 @@
 api:
   listen: :1984
+  origin: "*"
 rtsp:
   listen: :8554
+  default_query: transport=tcp
 webrtc:
   listen: :8555
 streams:
   cam_de0d1111-cf62-4084-bc8d-bd69478b3cd4_main:
-    - rtsp://admin:admin123456@192.168.1.3:8554/profile0#timeout=5#media=video
-  cam_de0d1111-cf62-4084-bc8d-bd69478b3cd4_sub: rtsp://admin:admin123456@192.168.1.3:8554/profile0#timeout=5#media=video
-  cam_03acf7ca-ac89-4b89-bf13-b72021b3bb8c_main: rtsp://admin:admin123456@192.168.1.6:554/ch=1?subtype=0#timeout=5#media=video
-  cam_03acf7ca-ac89-4b89-bf13-b72021b3bb8c_sub: rtsp://admin:admin123456@192.168.1.6:554/ch=1?subtype=0#timeout=5#media=video
+    - rtsp://admin:admin123456@192.168.1.3:8554/profile0#timeout=3#media=video#transport=tcp
+  cam_de0d1111-cf62-4084-bc8d-bd69478b3cd4_sub: rtsp://admin:admin123456@192.168.1.3:8554/profile0#timeout=3#media=video#transport=tcp
+  cam_03acf7ca-ac89-4b89-bf13-b72021b3bb8c_main:
+    - rtsp://admin:admin123456@192.168.1.6:554/ch=1?subtype=0#timeout=3#media=video#transport=tcp
+  cam_03acf7ca-ac89-4b89-bf13-b72021b3bb8c_sub: rtsp://admin:admin123456@192.168.1.6:554/ch=1?subtype=0#timeout=3#media=video#transport=tcp
   cam_a9094e61-0213-4cfd-ac6b-fb0078281882_main:
-    - rtsp://admin:admin123456@192.168.1.19:8554/profile0#timeout=5#media=video
-  cam_a9094e61-0213-4cfd-ac6b-fb0078281882_sub: rtsp://admin:admin123456@192.168.1.19:8554/profile0#timeout=5#media=video
+    - rtsp://admin:admin123456@192.168.1.19:8554/profile0#timeout=3#media=video#transport=tcp
+  cam_a9094e61-0213-4cfd-ac6b-fb0078281882_sub: rtsp://admin:admin123456@192.168.1.19:8554/profile0#timeout=3#media=video#transport=tcp
   cam_18f85036-f044-4f9c-92ea-c161c3b7335d_main:
-    - rtsp://sofa_api:sofa100200@192.168.1.23:554/stream1#timeout=5#media=video
-  cam_18f85036-f044-4f9c-92ea-c161c3b7335d_sub: rtsp://sofa_api:sofa100200@192.168.1.23:554/stream1#timeout=5#media=video
+    - rtsp://sofa_api:sofa100200@192.168.1.23:554/stream1#timeout=3#media=video#transport=tcp
+  cam_18f85036-f044-4f9c-92ea-c161c3b7335d_sub: rtsp://sofa_api:sofa100200@192.168.1.23:554/stream1#timeout=3#media=video#transport=tcp
   cam_66e36fab-4241-4798-836b-7994a0d35e28_main:
-    - rtsp://admin:admin123456@192.168.1.9:554/ch=1?subtype=0#timeout=5#media=video
-  cam_66e36fab-4241-4798-836b-7994a0d35e28_sub: rtsp://admin:admin123456@192.168.1.9:554/ch=1?subtype=0#timeout=5#media=video
+    - rtsp://admin:admin123456@192.168.1.9:554/ch=1?subtype=0#timeout=3#media=video#transport=tcp
+  cam_66e36fab-4241-4798-836b-7994a0d35e28_sub: rtsp://admin:admin123456@192.168.1.9:554/ch=1?subtype=0#timeout=3#media=video#transport=tcp

@@ -1,52 +1,86 @@
 @echo off
 chcp 65001 >nul 2>&1
-setlocal
+setlocal EnableDelayedExpansion
+
+REM Double-click this file. Do NOT paste lines into CMD.
+
 cd /d "%~dp0"
-set "ROOT=%~dp0..\.."
-cd /d "%ROOT%"
+set "GUI=%~dp0"
+if "!GUI:~-1!"=="\" set "GUI=!GUI:~0,-1!"
 
-echo ========================================
-echo  بناء CompanyEdgeLauncher.exe
-echo ========================================
-echo.
-
-where python >nul 2>&1 || (
-  echo [ERROR] Python غير مثبت — https://www.python.org/downloads/
-  pause
-  exit /b 1
+set "ROOT="
+for /L %%i in (1,1,6) do (
+  if exist "!CD!\package.json" (
+    set "ROOT=!CD!"
+    goto :root_ok
+  )
+  cd ..
 )
 
-python -m pip install --upgrade pip
-python -m pip install -r "%~dp0requirements-build.txt"
-if errorlevel 1 goto :fail
+echo [ERROR] package.json not found.
+echo Put the full project on Desktop, then double-click build-windows.bat
+pause
+exit /b 1
 
-echo.
-echo جاري البناء ^(دقيقة أو دقيقتان^)...
-python -m PyInstaller ^
-  --noconfirm ^
-  --onefile ^
-  --windowed ^
-  --name CompanyEdgeLauncher ^
-  --distpath "%ROOT%\dist-launcher" ^
-  --workpath "%~dp0build" ^
-  --specpath "%~dp0" ^
-  "%~dp0app.py"
-
-if errorlevel 1 goto :fail
-
-echo.
+:root_ok
 echo ========================================
-echo  تم: %ROOT%\dist-launcher\CompanyEdgeLauncher.exe
+echo  Build CompanyEdgeLauncher.exe
 echo ========================================
 echo.
-echo انسخ CompanyEdgeLauncher.exe إلى مجلد ip-cam-viewer
-echo ^(نفس المجلد الذي فيه package.json^)
-echo ثم شغّله بالنقر المزدوج.
+echo Project: !ROOT!
 echo.
+
+where py >nul 2>&1
+if not errorlevel 1 (
+  set "PY_LAUNCHER=py"
+  set "PY_VER=-3"
+  goto :py_ok
+)
+where python >nul 2>&1
+if not errorlevel 1 (
+  set "PY_LAUNCHER=python"
+  set "PY_VER="
+  goto :py_ok
+)
+echo [ERROR] Python not installed. Install from python.org - Add to PATH
+pause
+exit /b 1
+
+:py_ok
+echo Python: !PY_LAUNCHER! !PY_VER!
+echo.
+
+!PY_LAUNCHER! !PY_VER! -m pip install --upgrade pip
+if errorlevel 1 goto :fail
+
+!PY_LAUNCHER! !PY_VER! -m pip install -r "!GUI!\requirements-build.txt"
+if errorlevel 1 goto :fail
+
+if not exist "!ROOT!\dist-launcher" mkdir "!ROOT!\dist-launcher"
+
+set "SCRIPT=!GUI!\app.py"
+set "WORKDIR=!GUI!\build"
+set "SPECDIR=!GUI!\."
+
+echo Building EXE (1-2 min)...
+!PY_LAUNCHER! !PY_VER! -m PyInstaller --noconfirm --onefile --windowed --name CompanyEdgeLauncher --distpath "!ROOT!\dist-launcher" --workpath "!WORKDIR!" --specpath "!SPECDIR!" "!SCRIPT!"
+if errorlevel 1 goto :fail
+
+if not exist "!ROOT!\dist-launcher\CompanyEdgeLauncher.exe" (
+  echo [ERROR] EXE not created.
+  goto :fail
+)
+
+echo.
+echo SUCCESS:
+echo !ROOT!\dist-launcher\CompanyEdgeLauncher.exe
+echo.
+echo Copy the EXE next to package.json and run it.
 pause
 exit /b 0
 
 :fail
-echo [ERROR] فشل البناء
+echo.
+echo [ERROR] Build failed.
 pause
 exit /b 1

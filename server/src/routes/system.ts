@@ -5,6 +5,11 @@ import { prisma } from '../lib/prisma.js';
 import { requireAuth, requirePermission } from '../lib/auth-middleware.js';
 import { config } from '../config.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
+import {
+  getFaceAnalysisMode,
+  setFaceAnalysisMode,
+  type FaceAnalysisMode,
+} from '../face/analysis-settings.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -76,6 +81,19 @@ router.post('/backup', requirePermission('backup'), async (_req, res) => {
   );
 
   res.json({ ok: true, folder: backupFolder, timestamp: stamp });
+});
+
+router.get('/face-analysis', requirePermission('manage_cameras'), (_req, res) => {
+  res.json({ mode: getFaceAnalysisMode() });
+});
+
+router.put('/face-analysis', requirePermission('manage_cameras'), async (req, res) => {
+  const mode = req.body?.mode as FaceAnalysisMode;
+  if (mode !== 'people_only' && mode !== 'people_and_objects') {
+    return res.status(400).json({ error: 'mode must be people_only or people_and_objects' });
+  }
+  await setFaceAnalysisMode(mode);
+  res.json({ mode, ok: true });
 });
 
 router.get('/backups', requirePermission('backup'), async (_req, res) => {

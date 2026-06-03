@@ -8,6 +8,7 @@ import {
   linkTrackToEmployee,
   serializeTrackDescriptor,
 } from './face-tracker.js';
+import { linkFingerprintToEmployee } from './global-face-store.js';
 import { emitToAll } from '../ws/hub.js';
 
 const AUTO_NOTES = 'auto-enrolled';
@@ -76,14 +77,16 @@ function mergeKnownFace(target: KnownFace[], entry: KnownFace) {
 export async function autoEnrollFromTrack(
   cameraId: string,
   trackId: string,
+  globalTrackId: string,
   trackNum: number,
   descriptor: Float32Array,
   snapPath: string,
   known: KnownFace[],
-  hits: number
+  hits: number,
+  minHits = config.faceTrackEnrollMinHits
 ): Promise<KnownFace | null> {
   if (!config.faceAutoEnrollUnknown) return null;
-  if (hits < config.faceTrackEnrollMinHits) return null;
+  if (hits < minHits) return null;
 
   return withEnrollLock(async () => {
     const dbKnown = await loadKnownFacesFromDb();
@@ -97,6 +100,7 @@ export async function autoEnrollFromTrack(
       };
       mergeKnownFace(known, entry);
       linkTrackToEmployee(cameraId, trackId, existing.employeeId, existing.profileId, existing.fullName);
+      await linkFingerprintToEmployee(globalTrackId, existing.employeeId).catch(() => {});
       return entry;
     }
 
@@ -133,6 +137,7 @@ export async function autoEnrollFromTrack(
     };
     mergeKnownFace(known, entry);
     linkTrackToEmployee(cameraId, trackId, employee.id, profile.id, fullName);
+    await linkFingerprintToEmployee(globalTrackId, employee.id).catch(() => {});
 
     console.log(`[face] Track ${trackId} -> new employee ${fullName} (fingerprint saved)`);
     emitToAll('employee:auto_created', {

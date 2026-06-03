@@ -1,6 +1,9 @@
 node_modules/
 .venv/
 dist/
+dist-launcher/
+scripts/company-edge-gui/build/
+scripts/company-edge-gui/*.spec
 .env
 *.db
 

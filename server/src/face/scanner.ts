@@ -19,8 +19,13 @@ import { emitToAll } from '../ws/hub.js';
 import { dispatchEvent } from '../routes/notifications.js';
 import { autoEnrollFromTrack } from './auto-enroll.js';
 import { confirmLiveDetection } from './confirm.js';
-import { updateFaceTracks } from './face-tracker.js';
-import { bodyBoxFromFace, bboxIou } from './overlay.js';
+import {
+  getGlobalTrackMeta,
+  initGlobalFaceTracksFromDb,
+  setCrossCameraHandler,
+  updateFaceTracks,
+} from './face-tracker.js';
+import { sceneObjectsEnabled } from './analysis-settings.js';
 import { emitLiveClear, emitLiveFrame, setScanStatus } from './scanner-status.js';
 
 const lastSeenByEmployee = new Map<string, { cameraId: string; logId: string; at: number }>();
@@ -267,7 +272,7 @@ export async function scanCameraOnce(cameraId: string, known: KnownFace[]): Prom
     throw new Error('FRAME_CAPTURE_FAILED');
   }
 
-  const { detections, persons, meta, error } = await detectAndMatchAll(frame, known);
+  const { detections, objects, meta, error } = await detectAndMatchAll(frame, known);
   if (error) throw new Error(error);
 
   const frameWidth = meta.imageWidth;
@@ -300,7 +305,19 @@ export async function scanCameraOnce(cameraId: string, known: KnownFace[]): Prom
   );
 
   const ts = Date.now();
-  const usedPersonIdx = new Set<number>();
+
+  if (sceneObjectsEnabled()) {
+    for (const obj of objects) {
+      if (obj.class === 'person') continue;
+      liveItems.push({
+        detectionType: 'object',
+        objectClass: obj.class,
+        trackLabel: obj.class,
+        bbox: obj.bbox,
+        confidence: obj.score,
+      });
+    }
+  }
 
   for (let i = 0; i < tracked.length; i++) {
     const tr = tracked[i];
@@ -311,23 +328,6 @@ export async function scanCameraOnce(cameraId: string, known: KnownFace[]): Prom
     const liveConf = det.liveMatch?.confidence ?? det.detectionScore;
 
     if (det.detectionScore < config.faceMinDetectionScore) continue;
-
-    const body = bodyBoxFromFace(tr.bbox, frameWidth, frameHeight);
-    if (config.faceShowPersonBoxes) {
-      liveItems.push({
-        detectionType: 'person',
-        trackId: tr.trackId,
-        trackLabel: displayName,
-        globalTrackId: tr.globalTrackId,
-        globalTrackLabel: tr.globalTrackLabel,
-        bbox: body,
-        confidence: liveConf,
-      });
-    }
-
-    persons.forEach((p, idx) => {
-      if (bboxIou(body, p.bbox) > 0.25) usedPersonIdx.add(idx);
-    });
 
     const showFace =
       tr.employeeId && det.liveMatch
@@ -370,14 +370,21 @@ export async function scanCameraOnce(cameraId: string, known: KnownFace[]): Prom
             : Math.min(0.65, Math.max(0.45, det.detectionScore)));
         await recordDetection(tr.employeeId, cameraId, confidence, snapPath, tr.bbox);
       } else if (tr.isUnknown && det.detectionScore >= config.faceMinDetectionScore) {
+        const gMeta = getGlobalTrackMeta(tr.globalTrackId);
+        const minHits =
+          gMeta && gMeta.cameraIds.length >= 2
+            ? config.faceCrossCameraEnrollHits
+            : config.faceTrackEnrollMinHits;
         const enrolled = await autoEnrollFromTrack(
           cameraId,
           tr.trackId,
+          tr.globalTrackId,
           tr.globalTrackNum,
           tr.descriptor,
           snapPath,
           known,
-          tr.hits
+          tr.hits,
+          minHits
         );
         if (enrolled) {
           await recordDetection(enrolled.employeeId, cameraId, 0.75, snapPath, tr.bbox);
@@ -389,19 +396,6 @@ export async function scanCameraOnce(cameraId: string, known: KnownFace[]): Prom
     } catch (e) {
       console.warn(`[face] snapshot/record ${camera.name} ${tr.trackId}:`, e);
     }
-  }
-
-  if (config.faceShowPersonBoxes) {
-    persons.forEach((p, idx) => {
-      if (usedPersonIdx.has(idx)) return;
-      liveItems.push({
-        detectionType: 'person',
-        trackId: `${cameraId.slice(0, 8)}-p${idx}`,
-        trackLabel: 'شخص',
-        bbox: p.bbox,
-        confidence: p.score,
-      });
-    });
   }
 
   if (liveItems.length) {
@@ -520,8 +514,43 @@ async function syncCameraLoops() {
   }
 }
 
+async function handleCrossCameraTransfer(ev: {
+  globalTrackId: string;
+  globalTrackNum: number;
+  fromCameraId: string;
+  toCameraId: string;
+  employeeId?: string;
+  fullName?: string;
+}) {
+  const [fromCam, toCam] = await Promise.all([
+    prisma.camera.findUnique({ where: { id: ev.fromCameraId }, select: { name: true } }),
+    prisma.camera.findUnique({ where: { id: ev.toCameraId }, select: { name: true } }),
+  ]);
+  const label = ev.fullName ?? `شخص #${ev.globalTrackNum}`;
+  const payload = {
+    globalTrackId: ev.globalTrackId,
+    globalTrackNum: ev.globalTrackNum,
+    employeeId: ev.employeeId,
+    employeeName: label,
+    fromCameraId: ev.fromCameraId,
+    fromCameraName: fromCam?.name ?? ev.fromCameraId,
+    toCameraId: ev.toCameraId,
+    toCameraName: toCam?.name ?? ev.toCameraId,
+    at: new Date().toISOString(),
+  };
+  console.log(
+    `[face] Cross-camera: ${label} ${payload.fromCameraName} → ${payload.toCameraName}`
+  );
+  emitToAll('face:camera_transfer', payload);
+  void dispatchEvent('face_camera_transfer', payload);
+}
+
 export function startFaceScanner() {
   void loadFaceModels().catch((e) => console.error('[face] model load failed:', e));
+  void initGlobalFaceTracksFromDb().catch((e) =>
+    console.error('[face] load global fingerprints:', e)
+  );
+  setCrossCameraHandler(handleCrossCameraTransfer);
 
   void syncCameraLoops();
   setInterval(() => {
@@ -538,6 +567,7 @@ export function startFaceScanner() {
 }
 
 export function stopFaceScanner() {
+  setCrossCameraHandler(null);
   for (const id of cameraLoopRunning) {
     loopAbort.set(id, true);
   }

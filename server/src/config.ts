@@ -16,6 +16,9 @@ function resolveFromRoot(p: string | undefined, fallback: string): string {
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   host: process.env.HOST || '0.0.0.0',
+  /** Single-port company edge: serve built React app from API server. */
+  serveClient: process.env.SERVE_CLIENT === 'true',
+  clientDist: path.join(root, 'client/dist'),
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
@@ -30,7 +33,7 @@ export const config = {
   siteName: process.env.SITE_NAME || 'IP Camera Viewer',
   facesPath: process.env.FACES_PATH || path.join(root, 'data/faces'),
   faceModelsPath: process.env.FACE_MODELS_PATH || path.join(root, 'server/models/face-api'),
-  faceScanIntervalSec: parseInt(process.env.FACE_SCAN_INTERVAL_SEC || '3', 10),
+  faceScanIntervalSec: parseInt(process.env.FACE_SCAN_INTERVAL_SEC || '1', 10),
   faceDetectTimeoutSec: parseInt(process.env.FACE_DETECT_TIMEOUT_SEC || '90', 10),
   faceScanMaxBackoffSec: parseInt(process.env.FACE_SCAN_MAX_BACKOFF_SEC || '20', 10),
   faceTrackTtlSec: parseInt(process.env.FACE_TRACK_TTL_SEC || '75', 10),
@@ -45,6 +48,13 @@ export const config = {
   faceAutoEnrollMatchThreshold: parseFloat(process.env.FACE_AUTO_ENROLL_MATCH_THRESHOLD || '0.5'),
   /** Scans before auto-creating employee from an unknown track. */
   faceTrackEnrollMinHits: parseInt(process.env.FACE_TRACK_ENROLL_MIN_HITS || '4', 10),
+  /** Faster enroll when the same face was seen on another camera already. */
+  faceCrossCameraEnrollHits: parseInt(process.env.FACE_CROSS_CAMERA_ENROLL_HITS || '2', 10),
+  /** Keep cross-camera fingerprints in DB (seconds). */
+  faceGlobalFingerprintPersistSec: parseInt(
+    process.env.FACE_GLOBAL_FINGERPRINT_PERSIST_SEC || '86400',
+    10
+  ),
   faceMatchThreshold: parseFloat(process.env.FACE_MATCH_THRESHOLD || '0.55'),
   /** Looser match for attendance logs only (not live overlay). */
   faceMatchThresholdCctv: parseFloat(process.env.FACE_MATCH_THRESHOLD_CCTV || '0.62'),
@@ -59,8 +69,16 @@ export const config = {
   /** Stream quality used for face scan snapshots (should match dashboard: sub). */
   faceScanStreamQuality: (process.env.FACE_SCAN_QUALITY === 'main' ? 'main' : 'sub') as 'main' | 'sub',
   facePersonDetect: process.env.FACE_PERSON_DETECT !== 'false',
-  /** Draw blue person boxes on live view (off = face labels only, cleaner). */
+  /** people_only (default) | people_and_objects — see face/analysis-settings.ts for runtime override. */
+  faceAnalysisMode:
+    process.env.FACE_ANALYSIS_MODE === 'people_and_objects'
+      ? ('people_and_objects' as const)
+      : ('people_only' as const),
+  /** @deprecated Use analysis-settings.sceneObjectsEnabled() */
+  faceSceneObjects: process.env.FACE_ANALYSIS_MODE === 'people_and_objects',
+  /** @deprecated Use faceShowObjectBoxes — kept for compatibility. */
   faceShowPersonBoxes: process.env.FACE_SHOW_PERSON_BOXES === 'true',
+  faceObjectMinScore: parseFloat(process.env.FACE_OBJECT_CONF || '0.42'),
   faceMinPersonScore: parseFloat(process.env.FACE_MIN_PERSON_SCORE || '0.25'),
   faceModelsDir: resolveFromRoot(process.env.FACE_MODELS_DIR, 'server/models'),
   faceAbsenceCloseSec: parseInt(process.env.FACE_ABSENCE_CLOSE_SEC || '180', 10),

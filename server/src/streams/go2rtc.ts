@@ -35,7 +35,7 @@ export function buildRtspWithAuth(rtspUrl: string, username: string, password: s
 export function tuneRtspForLowLatency(rtspUrl: string): string {
   if (!rtspUrl.startsWith('rtsp')) return rtspUrl;
   if (rtspUrl.includes('#')) return rtspUrl;
-  return `${rtspUrl}#timeout=5#media=video`;
+  return `${rtspUrl}#timeout=3#media=video#transport=tcp`;
 }
 
 export async function loadYamlConfig(): Promise<Record<string, unknown>> {
@@ -49,11 +49,25 @@ export async function loadYamlConfig(): Promise<Record<string, unknown>> {
 
 function defaultGo2rtcConfig(): Record<string, unknown> {
   return {
-    api: { listen: ':1984' },
-    rtsp: { listen: ':8554' },
+    api: { listen: ':1984', origin: '*' },
+    rtsp: { listen: ':8554', default_query: 'transport=tcp' },
     webrtc: { listen: ':8555' },
     streams: {},
   };
+}
+
+/** Allow browser WS from Vite (localhost:5173) and reverse proxies. */
+function ensureApiOrigin(cfg: Record<string, unknown>) {
+  const api = ((cfg.api as Record<string, unknown>) || {}) as Record<string, unknown>;
+  if (!api.origin) api.origin = '*';
+  cfg.api = api;
+}
+
+function ensureLowLatencyModules(cfg: Record<string, unknown>) {
+  const rtsp = ((cfg.rtsp as Record<string, unknown>) || {}) as Record<string, unknown>;
+  if (!rtsp.default_query) rtsp.default_query = 'transport=tcp';
+  cfg.rtsp = rtsp;
+  if (!cfg.webrtc) cfg.webrtc = { listen: ':8555' };
 }
 
 export async function saveYamlConfig(cfg: Record<string, unknown>) {
@@ -63,6 +77,8 @@ export async function saveYamlConfig(cfg: Record<string, unknown>) {
 
 export async function syncCameraStreams(cameras: Camera[]) {
   const cfg = await loadYamlConfig();
+  ensureApiOrigin(cfg);
+  ensureLowLatencyModules(cfg);
   const streams: Record<string, string> = {};
 
   for (const cam of cameras) {
@@ -187,10 +203,10 @@ export async function fetchGo2rtcFrame(streamName: string, attempts = 4): Promis
 }
 
 async function warmStream(streamName: string): Promise<void> {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 3; i++) {
     const r = await fetchGo2rtcFrame(streamName, 1);
     if (r.ok) return;
-    await sleep(200);
+    await sleep(100);
   }
 }
 
@@ -227,7 +243,7 @@ export async function registerStream(camera: Camera, quality: 'main' | 'sub' = '
     await saveYamlConfig(cfg);
   }
 
-  await warmStream(go2rtcName);
+  void warmStream(go2rtcName);
 
   activeStreams.add(key);
   return go2rtcName;

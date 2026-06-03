@@ -24,6 +24,7 @@ from tkinter import (
     BOTH,
     END,
     LEFT,
+    RIGHT,
     Button,
     Frame,
     Label,
