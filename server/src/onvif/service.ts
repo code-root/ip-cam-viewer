@@ -116,8 +116,10 @@ function normalizeConnectError(err: unknown): Error {
   return new Error(String(err));
 }
 
+const CONNECT_TIMEOUT_MS = 20_000;
+
 function connectCam(host: string, port: number, username: string, password: string): Promise<OnvifCam> {
-  return new Promise((resolve, reject) => {
+  const connectPromise = new Promise<OnvifCam>((resolve, reject) => {
     const fail = (err: unknown) => reject(normalizeConnectError(err));
     try {
       const cam = new Cam(
@@ -129,6 +131,16 @@ function connectCam(host: string, port: number, username: string, password: stri
       fail(err);
     }
   });
+
+  const timeoutPromise = new Promise<OnvifCam>((_, reject) => {
+    setTimeout(() => {
+      const e = new Error(`ONVIF connection timeout (${CONNECT_TIMEOUT_MS}ms)`);
+      (e as Error & { code?: string }).code = 'TIMEOUT';
+      reject(e);
+    }, CONNECT_TIMEOUT_MS);
+  });
+
+  return Promise.race([connectPromise, timeoutPromise]);
 }
 
 export interface DiscoverOptions {

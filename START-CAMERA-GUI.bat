@@ -66,6 +66,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/3] Starting GUI...
+echo [2/3] Starting GUI ^(checks API updates, rebuild if needed^)...
 %PY% "scripts\company-edge-gui\app.py"
+if errorlevel 5 exit /b 0
 pause

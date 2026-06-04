@@ -41,15 +41,22 @@ const newFn = `Cam.prototype._parseChallenge = function(digest) { /* ${marker} *
 \treturn out;
 };`;
 
-if (!src.includes(oldFn.replace(/\t/g, '')) && !src.includes('Cam.prototype._parseChallenge = function(digest)')) {
+const legacyRe =
+  /Cam\.prototype\._parseChallenge = function\(digest\) \{[\s\S]*?return Object\.fromEntries\(parts\);\r?\n\};/;
+
+if (src.includes(marker)) {
+  console.log('[patch-onvif] already patched');
+  process.exit(0);
+}
+
+if (src.includes(oldFn)) {
+  src = src.replace(oldFn, newFn);
+} else if (legacyRe.test(src)) {
+  src = src.replace(legacyRe, newFn);
+} else {
   console.warn('[patch-onvif] cam.js format changed — manual check needed');
   process.exit(1);
 }
-
-src = src.includes(oldFn) ? src.replace(oldFn, newFn) : src.replace(
-  /Cam\.prototype\._parseChallenge = function\(digest\) \{[\s\S]*?return Object\.fromEntries\(parts\);\n\};/,
-  newFn
-);
 
 fs.writeFileSync(camPath, src);
 console.log('[patch-onvif] patched', camPath);

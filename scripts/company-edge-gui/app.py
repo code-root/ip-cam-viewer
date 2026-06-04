@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from camera_panel import CameraWizardPanel
+from auto_update import check_and_apply_updates
 from edge_agent import edge_config, provision_cameras
 from win_optimize import apply_windows_optimizations
 from tkinter import (
@@ -517,6 +518,32 @@ class CompanyEdgeApp:
         self.tk.destroy()
 
 
+def _run_startup_update() -> None:
+    """Check api-stpreg releases; apply zip + rebuild (may sys.exit for EXE relaunch)."""
+    splash = Tk()
+    splash.title("Updating…")
+    splash.geometry("520x160")
+    splash.resizable(False, False)
+    Label(splash, text="Checking releases API…", font=("Segoe UI", 11)).pack(pady=8)
+    log_box = Text(splash, height=6, font=("Consolas", 8))
+    log_box.pack(fill=BOTH, expand=True, padx=8, pady=4)
+
+    def log(msg: str) -> None:
+        log_box.insert(END, msg + "\n")
+        log_box.see(END)
+        splash.update_idletasks()
+
+    try:
+        check_and_apply_updates(ROOT, log)
+    except Exception as exc:
+        log(f"[update] error: {exc}")
+    finally:
+        try:
+            splash.destroy()
+        except Exception:
+            pass
+
+
 def main() -> None:
     if not (ROOT / "package.json").is_file():
         root = Tk()
@@ -528,6 +555,10 @@ def main() -> None:
         )
         root.destroy()
         return
+
+    if edge_config(ROOT).get("auto_update") and edge_config(ROOT).get("updates_api"):
+        _run_startup_update()
+
     CompanyEdgeApp().tk.mainloop()
 
 

@@ -81,6 +81,7 @@ function runImportCheck(pythonBin: string): Promise<{ ok: boolean; detail: strin
 
 /** Resolve a Python binary that has face_recognition installed. */
 export async function resolvePythonBin(): Promise<string | null> {
+  if (!config.faceScanEnabled) return null;
   if (resolvedPython) return resolvedPython;
 
   const tried: Array<{ bin: string; error: string }> = [];

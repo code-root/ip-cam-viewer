@@ -48,6 +48,10 @@ def edge_config(root: Path) -> dict[str, str]:
             "EDGE_DISCOVER_TIMEOUT_MS", "5000" if light else "12000"
         ),
         "subnet_scan": _truthy(env.get("EDGE_SUBNET_SCAN"), default=not light),
+        "updates_api": env.get("EDGE_UPDATES_API", "").strip().rstrip("/"),
+        "updates_project": env.get("EDGE_UPDATES_PROJECT", "ip-cam-viewer").strip(),
+        "updates_token": env.get("EDGE_UPDATES_TOKEN", env.get("EDGE_API_TOKEN", "")).strip(),
+        "auto_update": _truthy(env.get("EDGE_AUTO_UPDATE"), default=True),
     }
 
 
@@ -146,7 +150,7 @@ class EdgeApiClient:
                 "username": username,
                 "password": password,
             },
-            timeout=25,
+            timeout=45,
         )
 
     def create_camera(

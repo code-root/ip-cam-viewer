@@ -119,6 +119,7 @@ async function checkPythonFaceBackend(): Promise<boolean> {
 }
 
 export async function loadFaceModels(): Promise<boolean> {
+  if (!config.faceScanEnabled) return false;
   if (backendReady) return true;
 
   if (await checkPythonFaceBackend()) {

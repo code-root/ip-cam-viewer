@@ -175,7 +175,47 @@ Copy **`CompanyEdgeLauncher.exe`** next to **`package.json`**, then run it.
 
 ---
 
-## 10. File map
+## 10. Auto-update (api-stpreg releases)
+
+The GUI and EXE can pull updates from your **api-stpreg** `project-updates` API on every start.
+
+### On api-stpreg (once)
+
+1. Add env: `PROJECT_RELEASE_ALLOWED_SLUGS=cfa,snapchat,ip-cam-viewer`
+2. In admin, upload a release zip for project **`ip-cam-viewer`**, or use the upload API.
+
+### Publish a new version (developer PC)
+
+```bat
+set EDGE_UPDATES_API=https://your-api.com/api/internal
+set EDGE_UPDATES_TOKEN=your-bearer-token
+PUBLISH-RELEASE.bat
+```
+
+Or:
+
+```bat
+python scripts\publish-release.py --version 1.0.1 --api https://your-api.com/api/internal --token TOKEN
+```
+
+### On company PC (.env)
+
+```env
+EDGE_AUTO_UPDATE=true
+EDGE_UPDATES_API=https://your-api.com/api/internal
+EDGE_UPDATES_PROJECT=ip-cam-viewer
+EDGE_UPDATES_TOKEN=same-api-token-with-read.server
+```
+
+When the user opens **START-CAMERA-GUI.bat** or **CompanyEdgeLauncher.exe**:
+
+1. `GET …/project-updates/ip-cam-viewer/latest`
+2. If newer → download zip → extract (keeps `.env` and `data/`) → `npm install` → `npm run build`
+3. If a new `CompanyEdgeLauncher.exe` is in the release → relaunch automatically
+
+---
+
+## 11. File map
 
 ```
 ip-cam-viewer-main/
