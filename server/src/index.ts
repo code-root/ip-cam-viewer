@@ -33,6 +33,12 @@ process.on('unhandledRejection', (reason) => {
 });
 
 process.on('uncaughtException', (err) => {
+  const msg = String(err);
+  const stack = err instanceof Error ? err.stack || '' : '';
+  if (/reading 'slice'/i.test(msg) && /onvif[\\/]lib[\\/]cam\.js/i.test(stack)) {
+    console.warn('[onvif] digest parse error on a device (ignored) — use camera username/password');
+    return;
+  }
   console.error('[server] uncaught exception (process kept alive):', err);
 });
 

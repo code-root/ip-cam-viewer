@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""واجهة: اكتشاف → تسجيل دخول → اختبار → بث عبر API + WebSocket."""
+"""Per-camera credentials (like website) → discover → test → stream."""
 from __future__ import annotations
 
 import threading
@@ -12,68 +12,91 @@ from edge_ws import EdgeSocketClient
 
 
 class CameraWizardPanel(Frame):
-    STEP_DISCOVER = "① اكتشاف"
-    STEP_LOGIN = "② دخول/اختبار"
-    STEP_STREAM = "③ بث WebSocket"
-
-    def __init__(self, master, *, get_base_url, get_root, on_log, is_server_running) -> None:
+    def __init__(
+        self,
+        master,
+        *,
+        get_root,
+        on_log,
+        ensure_server,
+    ) -> None:
         super().__init__(master)
-        self.get_base_url = get_base_url
         self.get_root = get_root
         self.on_log = on_log
-        self.is_server_running = is_server_running
+        self.ensure_server = ensure_server
 
         self.client: EdgeApiClient | None = None
         self.ws: EdgeSocketClient | None = None
         self.devices: list[dict] = []
         self.device_status: dict[str, str] = {}
+        self.device_creds: dict[str, dict[str, str]] = {}
         self._busy = False
 
         cfg = edge_config(get_root())
-        self.var_cam_user = StringVar(value=cfg["camera_user"])
-        self.var_cam_pass = StringVar(value=cfg.get("camera_password", ""))
+        self.var_host = StringVar(value=cfg["host_url"])
+        self.var_sel_label = StringVar(value="No camera selected")
+        self.var_cam_user = StringVar(value="admin")
+        self.var_cam_pass = StringVar(value="")
         self.var_api_user = StringVar(value=cfg["api_user"])
         self.var_api_pass = StringVar(value=cfg["api_password"])
-        self.var_step = StringVar(value=self.STEP_DISCOVER)
-        self.var_ws = StringVar(value="Socket.IO: غير متصل")
+        self.var_step = StringVar(value="① Discover → ② Select camera → enter its password → Test → Stream")
+        self.var_ws = StringVar(value="Socket.IO: offline")
 
         self._build()
 
+    def get_base_url(self) -> str:
+        return self.var_host.get().strip().rstrip("/") or "http://127.0.0.1:3000"
+
     def _build(self) -> None:
-        cred = LabelFrame(self, text="بيانات الدخول (من البرنامج)", padx=8, pady=6)
+        host_row = Frame(self)
+        host_row.pack(fill=X, pady=2)
+        Label(host_row, text="Host API:", width=10, anchor="w").pack(side=LEFT)
+        Entry(host_row, textvariable=self.var_host, width=42).pack(side=LEFT, fill=X, expand=True, padx=4)
+
+        api_row = LabelFrame(self, text="API login (server)", padx=8, pady=4)
+        api_row.pack(fill=X, pady=2)
+        r = Frame(api_row)
+        r.pack(fill=X)
+        Label(r, text="User:", width=8).pack(side=LEFT)
+        Entry(r, textvariable=self.var_api_user, width=12).pack(side=LEFT, padx=4)
+        Label(r, text="Pass:", width=6).pack(side=LEFT)
+        Entry(r, textvariable=self.var_api_pass, width=12, show="•").pack(side=LEFT, padx=4)
+
+        cred = LabelFrame(self, text="Selected camera login (each camera is different — like the website)", padx=8, pady=6)
         cred.pack(fill=X, pady=4)
-
+        Label(cred, textvariable=self.var_sel_label, font=("Segoe UI", 9, "bold"), fg="#333").pack(anchor="w")
         row1 = Frame(cred)
-        row1.pack(fill=X)
-        Label(row1, text="مستخدم الكاميرا:", width=14, anchor="w").pack(side=LEFT)
-        Entry(row1, textvariable=self.var_cam_user, width=16).pack(side=LEFT, padx=4)
-        Label(row1, text="كلمة المرور:", width=10, anchor="w").pack(side=LEFT)
-        Entry(row1, textvariable=self.var_cam_pass, width=16, show="•").pack(side=LEFT, padx=4)
-
-        row2 = Frame(cred)
-        row2.pack(fill=X, pady=4)
-        Label(row2, text="مستخدم API:", width=14, anchor="w").pack(side=LEFT)
-        Entry(row2, textvariable=self.var_api_user, width=16).pack(side=LEFT, padx=4)
-        Label(row2, text="كلمة API:", width=10, anchor="w").pack(side=LEFT)
-        Entry(row2, textvariable=self.var_api_pass, width=16, show="•").pack(side=LEFT, padx=4)
+        row1.pack(fill=X, pady=4)
+        Label(row1, text="Username:", width=10, anchor="w").pack(side=LEFT)
+        Entry(row1, textvariable=self.var_cam_user, width=18).pack(side=LEFT, padx=4)
+        Label(row1, text="Password:", width=8, anchor="w").pack(side=LEFT)
+        Entry(row1, textvariable=self.var_cam_pass, width=18, show="•").pack(side=LEFT, padx=4)
+        Label(
+            cred,
+            text="Tip: select a camera in the list — enter its own username/password — then Test",
+            font=("Segoe UI", 8),
+            fg="#666",
+        ).pack(anchor="w")
 
         steps = Frame(self)
         steps.pack(fill=X, pady=4)
-        Label(steps, textvariable=self.var_step, font=("Segoe UI", 10, "bold"), fg="#0a5a8a").pack(side=LEFT)
+        Label(steps, textvariable=self.var_step, font=("Segoe UI", 9, "bold"), fg="#0a5a8a").pack(side=LEFT)
         Label(steps, textvariable=self.var_ws, font=("Segoe UI", 9), fg="#555").pack(side=RIGHT)
 
         btns = Frame(self)
         btns.pack(fill=X, pady=4)
-        self.btn_discover = Button(btns, text="① مسح الشبكة", width=14, command=self.run_discover)
+        self.btn_discover = Button(
+            btns, text="① Discover (starts server)", width=22, command=self.run_discover
+        )
         self.btn_discover.pack(side=LEFT, padx=3)
-        self.btn_test = Button(btns, text="② اختبار الاتصال", width=14, command=self.run_test)
+        self.btn_test = Button(btns, text="② Test this camera", width=14, command=self.run_test)
         self.btn_test.pack(side=LEFT, padx=3)
-        self.btn_stream = Button(btns, text="③ إضافة وبدء البث", width=16, command=self.run_add_stream)
+        self.btn_stream = Button(btns, text="③ Stream API", width=12, command=self.run_add_stream)
         self.btn_stream.pack(side=LEFT, padx=3)
-        self.btn_ws = Button(btns, text="ربط WebSocket", width=14, command=self.run_connect_ws)
-        self.btn_ws.pack(side=LEFT, padx=3)
+        self.btn_all = Button(btns, text="▶ Test + Stream", width=12, command=self.run_pipeline_selected)
+        self.btn_all.pack(side=LEFT, padx=3)
 
-        list_frame = LabelFrame(self, text="الكاميرات المكتشفة", padx=6, pady=6)
+        list_frame = LabelFrame(self, text="Discovered cameras", padx=6, pady=6)
         list_frame.pack(fill=BOTH, expand=True, pady=4)
         scroll = Scrollbar(list_frame)
         scroll.pack(side=RIGHT, fill=Y)
@@ -86,6 +109,7 @@ class CameraWizardPanel(Frame):
         )
         self.listbox.pack(fill=BOTH, expand=True)
         scroll.config(command=self.listbox.yview)
+        self.listbox.bind("<<ListboxSelect>>", self._on_select_device)
 
     def _device_key(self, dev: dict) -> str:
         return f"{dev['host']}:{dev.get('port', 80)}"
@@ -99,11 +123,49 @@ class CameraWizardPanel(Frame):
             return self.devices[idx]
         return None
 
+    def _save_creds_for_selected(self) -> None:
+        dev = self._selected_device()
+        if not dev:
+            return
+        key = self._device_key(dev)
+        self.device_creds[key] = {
+            "username": self.var_cam_user.get().strip() or "admin",
+            "password": self.var_cam_pass.get(),
+        }
+
+    def _load_creds_for_selected(self) -> None:
+        dev = self._selected_device()
+        if not dev:
+            self.var_sel_label.set("No camera selected")
+            return
+        key = self._device_key(dev)
+        name = dev.get("name") or dev.get("host")
+        self.var_sel_label.set(f"{dev['host']}:{dev.get('port', 80)} — {name}")
+        saved = self.device_creds.get(key)
+        if saved:
+            self.var_cam_user.set(saved.get("username", "admin"))
+            self.var_cam_pass.set(saved.get("password", ""))
+        else:
+            self.var_cam_user.set("admin")
+            self.var_cam_pass.set("")
+
+    def _on_select_device(self, _event=None) -> None:
+        self._load_creds_for_selected()
+
+    def _creds_for_device(self, dev: dict) -> tuple[str, str]:
+        key = self._device_key(dev)
+        saved = self.device_creds.get(key)
+        if saved:
+            return saved.get("username", "admin"), saved.get("password", "")
+        user = self.var_cam_user.get().strip() or "admin"
+        pwd = self.var_cam_pass.get()
+        return user, pwd
+
     def _refresh_list(self) -> None:
         self.listbox.delete(0, END)
         for d in self.devices:
             key = self._device_key(d)
-            st = self.device_status.get(key, "جديد")
+            st = self.device_status.get(key, "new")
             name = d.get("name") or d.get("host")
             mfr = d.get("manufacturer") or ""
             line = f"{d['host']}:{d.get('port', 80)}  {name}  [{st}]"
@@ -111,14 +173,15 @@ class CameraWizardPanel(Frame):
                 line += f"  ({mfr})"
             self.listbox.insert(END, line)
 
-    def _ensure_api(self) -> EdgeApiClient:
-        if not self.is_server_running():
-            raise RuntimeError("شغّل السيرفر أولاً (▶ تشغيل السيرفر)")
-        if self.client is None:
-            base = self.get_base_url()
+    def _reset_client(self) -> None:
+        self.client = None
+
+    def _ensure_host_api(self) -> EdgeApiClient:
+        base = self.ensure_server(self.get_base_url())
+        if self.client is None or self.client.base != base.rstrip("/"):
             self.client = EdgeApiClient(base)
             self.client.login(self.var_api_user.get().strip(), self.var_api_pass.get())
-            self.on_log(f"[كاميرات] تسجيل دخول API ✓")
+            self.on_log("[cameras] Host API login OK")
         return self.client
 
     def _async(self, fn) -> None:
@@ -131,8 +194,8 @@ class CameraWizardPanel(Frame):
             try:
                 fn()
             except Exception as exc:
-                self.on_log(f"[كاميرات] خطأ: {exc}")
-                self.after(0, lambda: Message.showerror("خطأ", str(exc)))
+                self.on_log(f"[cameras] error: {exc}")
+                self.after(0, lambda: Message.showerror("Error", str(exc)))
             finally:
                 self._busy = False
                 self.after(0, lambda: self._set_buttons(True))
@@ -141,23 +204,26 @@ class CameraWizardPanel(Frame):
 
     def _set_buttons(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
-        for b in (self.btn_discover, self.btn_test, self.btn_stream, self.btn_ws):
+        for b in (self.btn_discover, self.btn_test, self.btn_stream, self.btn_all):
             b.config(state=state)
 
     def run_discover(self) -> None:
         self._async(self._do_discover)
 
     def _do_discover(self) -> None:
-        self.var_step.set(self.STEP_DISCOVER)
-        client = self._ensure_api()
+        self.var_step.set("① Discovering…")
+        self._reset_client()
+        client = self._ensure_host_api()
         cfg = edge_config(self.get_root())
         timeout = int(cfg["discover_timeout"])
-        self.on_log(f"[كاميرات] مسح الشبكة ({timeout}ms)…")
-        self.devices = client.discover(timeout_ms=timeout)
-        self.device_status = {self._device_key(d): "مكتشف" for d in self.devices}
+        subnet = bool(cfg.get("subnet_scan"))
+        mode = "ONVIF multicast only" if not subnet else "full subnet scan"
+        self.on_log(f"[cameras] Discover ({mode}, {timeout}ms)")
+        self.devices = client.discover(timeout_ms=timeout, subnet_scan=subnet)
+        self.device_status = {self._device_key(d): "found" for d in self.devices}
         self.after(0, self._refresh_list)
-        self.on_log(f"[كاميرات] وُجد {len(self.devices)} جهاز")
-        self.var_step.set(f"{self.STEP_DISCOVER} — {len(self.devices)} جهاز")
+        self.on_log(f"[cameras] Found {len(self.devices)} — select one and enter its password")
+        self.var_step.set(f"① Found {len(self.devices)} — select camera + enter password")
 
     def run_test(self) -> None:
         self._async(self._do_test)
@@ -165,93 +231,91 @@ class CameraWizardPanel(Frame):
     def _do_test(self) -> None:
         dev = self._selected_device()
         if not dev:
-            raise RuntimeError("اختر كاميرا من القائمة")
-        self.var_step.set(self.STEP_LOGIN)
-        client = self._ensure_api()
+            raise RuntimeError("Select a camera from the list first")
+        self._save_creds_for_selected()
+        user, pwd = self._creds_for_device(dev)
+        if not pwd:
+            raise RuntimeError("Enter this camera's password (each camera has different credentials)")
+
+        self.var_step.set("② Testing login…")
+        client = self._ensure_host_api()
         host = dev["host"]
         port = int(dev.get("port") or 80)
-        user = self.var_cam_user.get().strip() or "admin"
-        pwd = self.var_cam_pass.get()
-        self.on_log(f"[كاميرات] اختبار {host}:{port} …")
+        self.on_log(f"[cameras] Test {host}:{port} as {user} …")
         result = client.test_camera(host, port, user, pwd)
         key = self._device_key(dev)
         if result.get("ok"):
-            self.device_status[key] = "✓ متصل"
+            self.device_status[key] = "OK"
             info = result.get("info") or {}
             if info.get("rtspMain"):
-                self.on_log(f"[كاميرات] RTSP: {info['rtspMain']}")
-            if result.get("preview", {}).get("streamName"):
-                self.on_log(f"[كاميرات] معاينة جاهزة: {result['preview']['streamName']}")
-            self.on_log("[كاميرات] التحقق من الاتصال ✓")
+                self.on_log(f"[cameras] RTSP: {info['rtspMain']}")
+            self.on_log("[cameras] Connection OK")
         else:
-            self.device_status[key] = "✗ فشل"
-            raise RuntimeError(result.get("message") or result.get("error") or "فشل الاختبار")
+            self.device_status[key] = "FAIL"
+            raise RuntimeError(result.get("message") or result.get("error") or "Test failed")
         self.after(0, self._refresh_list)
-        self.var_step.set(f"{self.STEP_LOGIN} — {host} ✓")
+        self.var_step.set(f"② {host} — OK")
 
     def run_add_stream(self) -> None:
         self._async(self._do_add_stream)
 
+    def run_pipeline_selected(self) -> None:
+        self._async(self._do_pipeline_selected)
+
+    def _do_pipeline_selected(self) -> None:
+        dev = self._selected_device()
+        if not dev:
+            raise RuntimeError("Select a camera first")
+        self._do_test()
+        self._do_add_stream()
+
     def _do_add_stream(self) -> None:
         dev = self._selected_device()
         if not dev:
-            raise RuntimeError("اختر كاميرا من القائمة")
-        key = self._device_key(dev)
-        already_linked = dev.get("linkStatus") == "exact"
-        if not already_linked and self.device_status.get(key) != "✓ متصل":
-            self._do_test()
-            if self.device_status.get(key) != "✓ متصل":
-                raise RuntimeError("نفّذ اختبار الاتصال أولاً")
+            raise RuntimeError("Select a camera from the list")
+        self._save_creds_for_selected()
+        user, pwd = self._creds_for_device(dev)
+        if not pwd:
+            raise RuntimeError("Enter this camera's password before streaming")
 
-        client = self._ensure_api()
+        key = self._device_key(dev)
+        if self.device_status.get(key) != "OK":
+            self._do_test()
+            if self.device_status.get(key) != "OK":
+                raise RuntimeError("Test connection failed — check username/password")
+
+        client = self._ensure_host_api()
         host = dev["host"]
         port = int(dev.get("port") or 80)
-        user = self.var_cam_user.get().strip() or "admin"
-        pwd = self.var_cam_pass.get()
         name = (dev.get("name") or host).strip() or host
 
         cam_id: str | None = None
         if dev.get("linkStatus") == "exact" and dev.get("exactMatches"):
             cam_id = dev["exactMatches"][0].get("id")
-            self.on_log(f"[كاميرات] كاميرا مربوطة مسبقاً — {name}")
+            self.on_log(f"[cameras] Update credentials on linked camera — {name}")
+            client.update_camera(cam_id, username=user, password=pwd)
         else:
-            self.on_log(f"[كاميرات] إضافة {name} …")
+            self.on_log(f"[cameras] Add {name} …")
             created = client.create_camera(name, host, port, user, pwd)
-            cam = created.get("camera") or {}
-            cam_id = cam.get("id")
-            self.on_log(f"[كاميرات] أُضيفت ✓ id={cam_id}")
+            cam_id = (created.get("camera") or {}).get("id")
+            self.on_log(f"[cameras] Added id={cam_id}")
 
         if not cam_id:
-            raise RuntimeError("لا يوجد معرّف كاميرا")
+            raise RuntimeError("No camera id")
 
-        self.var_step.set(self.STEP_STREAM)
-        self.on_log(f"[كاميرات] بدء البث عبر API …")
+        self.var_step.set("③ Starting stream…")
         stream = client.start_stream(cam_id, "sub")
         base = self.get_base_url()
         urls = stream.get("urls") or {}
         ws_path = urls.get("ws", "")
-        hls = urls.get("hls", "")
-        self.on_log(f"[كاميرات] stream: {stream.get('streamName')}")
-        if hls:
-            self.on_log(f"[كاميرات] HLS: {base}{hls}")
+        self.on_log(f"[cameras] stream: {stream.get('streamName')}")
         if ws_path:
-            self.on_log(f"[كاميرات] WebSocket (real-time): {base}{ws_path}")
+            self.on_log(f"[cameras] Real-time WS: {base}{ws_path}")
 
         self._connect_ws_and_subscribe(cam_id)
-        self.device_status[key] = "● يبث"
+        self.device_status[key] = "LIVE"
         self.after(0, self._refresh_list)
-        self.var_step.set(f"{self.STEP_STREAM} — {name}")
-
-    def run_connect_ws(self) -> None:
-        self._async(self._connect_ws_only)
-
-    def _connect_ws_only(self) -> None:
-        self._ensure_api()
-        dev = self._selected_device()
-        cam_id = None
-        if dev and dev.get("exactMatches"):
-            cam_id = dev["exactMatches"][0].get("id")
-        self._connect_ws_and_subscribe(cam_id)
+        self.var_step.set(f"③ LIVE — {name}")
 
     def _connect_ws_and_subscribe(self, camera_id: str | None) -> None:
         assert self.client and self.client.token
@@ -265,7 +329,7 @@ class CameraWizardPanel(Frame):
         self.ws.connect()
         if camera_id:
             self.ws.subscribe_camera(camera_id)
-        self.after(0, lambda: self.var_ws.set("Socket.IO: متصل ✓"))
+        self.after(0, lambda: self.var_ws.set("Socket.IO: connected"))
 
     def on_server_stopped(self) -> None:
         if self.ws:
@@ -275,4 +339,4 @@ class CameraWizardPanel(Frame):
                 pass
         self.ws = None
         self.client = None
-        self.var_ws.set("Socket.IO: غير متصل")
+        self.var_ws.set("Socket.IO: offline")

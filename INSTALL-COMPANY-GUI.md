@@ -22,7 +22,35 @@ Optional: Python `.venv` for face recognition — run `scripts\setup-face-python
 
 ---
 
-## 2. Quick start (recommended)
+## 2. Windows performance (optional, company PC only)
+
+On a **dedicated** camera server PC, run **once as Administrator**:
+
+```bat
+OPTIMIZE-WINDOWS-EDGE.bat
+```
+
+Or right-click **`START-CAMERA-GUI.bat`** → **Run as administrator**.
+
+This will (when `EDGE_DISABLE_DEFENDER=true` in `.env`):
+
+- Add Windows Defender **exclusions** for the project, Node, go2rtc, FFmpeg
+- Turn off Defender **real-time scanning** (less CPU while streaming)
+- Stop heavy background apps (Teams, OneDrive, etc. — configurable)
+
+**Security warning:** Only do this on a PC used only for cameras, on a trusted LAN, behind VPN for remote access. Do not disable Defender on a general office laptop.
+
+In `.env`:
+
+```env
+EDGE_WINDOWS_OPTIMIZE=true
+EDGE_DISABLE_DEFENDER=true
+EDGE_STOP_PROCESSES=OneDrive,MicrosoftTeams,GameBar
+```
+
+---
+
+## 3. Quick start (recommended)
 
 1. Open the project folder in File Explorer.
 2. Double-click:
@@ -35,7 +63,7 @@ Optional: Python `.venv` for face recognition — run `scripts\setup-face-python
 
 ---
 
-## 3. Manual install (Command Prompt)
+## 4. Manual install (Command Prompt)
 
 Open **cmd** and run **one command per line** (press Enter after each line).
 
@@ -67,23 +95,23 @@ Correct: two separate lines (see above).
 
 ---
 
-## 4. First-time server setup (inside the GUI)
+## 5. First-time server setup (inside the GUI)
 
 1. Click **Initial setup** — runs `npm install`, builds the app, installs go2rtc, database.
 2. Wait until the log says setup is complete.
 3. Click **Start server** — listens on port **3000**.
-4. Use the **Camera wizard** panel:
-   - Enter **camera** username/password
-   - Enter **API** username/password (default: `admin` / `admin123`)
-   - **① Scan network** — discover ONVIF cameras
-   - Select a camera → **② Test connection**
-   - **③ Add and start stream** — RTSP → go2rtc → API + WebSocket
+4. Use the **Camera wizard** (low CPU / light mode):
+   - **Host API:** `http://127.0.0.1:3000` (starts Node server automatically if stopped)
+   - Enter camera + API username/password
+   - **① Discover** — light ONVIF scan only (no full subnet scan)
+   - Select camera → **② Test login** → **③ Stream API** (real-time WebSocket)
+   - Or **▶ All for selected** — runs test + stream in one step
 
 5. Open in browser: `http://YOUR-PC-LAN-IP:3000`
 
 ---
 
-## 5. Environment file (optional)
+## 6. Environment file (optional)
 
 Copy the example env file:
 
@@ -103,7 +131,7 @@ EDGE_AUTO_PROVISION=true
 
 ---
 
-## 6. Build standalone EXE (optional)
+## 7. Build standalone EXE (optional)
 
 On Windows only:
 
@@ -120,7 +148,7 @@ Copy **`CompanyEdgeLauncher.exe`** next to **`package.json`**, then run it.
 
 ---
 
-## 7. Remote access (host PC)
+## 8. Remote access (host PC)
 
 - Cameras stay on the local LAN (`192.168.x.x`).
 - The company PC runs the server and pulls RTSP locally.
@@ -132,7 +160,7 @@ Copy **`CompanyEdgeLauncher.exe`** next to **`package.json`**, then run it.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
@@ -147,7 +175,7 @@ Copy **`CompanyEdgeLauncher.exe`** next to **`package.json`**, then run it.
 
 ---
 
-## 9. File map
+## 10. File map
 
 ```
 ip-cam-viewer-main/

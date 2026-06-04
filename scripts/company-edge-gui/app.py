@@ -23,6 +23,7 @@ from pathlib import Path
 
 from camera_panel import CameraWizardPanel
 from edge_agent import edge_config, provision_cameras
+from win_optimize import apply_windows_optimizations
 from tkinter import (
     BOTH,
     END,
@@ -173,6 +174,7 @@ def check_prereqs(root: Path) -> PrereqStatus:
 def build_edge_env(root: Path, lan_ip: str) -> dict[str, str]:
     env = os.environ.copy()
     port = os.environ.get("PORT", str(DEFAULT_PORT))
+    cfg = edge_config(root)
     env.update(
         {
             "HOST": "0.0.0.0",
@@ -187,6 +189,12 @@ def build_edge_env(root: Path, lan_ip: str) -> dict[str, str]:
             ),
         }
     )
+    if cfg.get("light_mode"):
+        env["ONVIF_DISCOVER_SUBNET_SCAN"] = "false"
+        env["ONVIF_DISCOVER_TIMEOUT_MS"] = str(cfg["discover_timeout"])
+        env["ONVIF_DISCOVER_CONCURRENCY"] = "12"
+        env["FACE_SCAN_ENABLED"] = "false"
+        env["EDGE_AUTO_PROVISION"] = "false"
     return env
 
 
@@ -251,6 +259,19 @@ class CompanyEdgeApp:
         self._build_ui()
         self._poll_log()
         self.refresh_status()
+        self._run_windows_optimize_on_start()
+
+    def _run_windows_optimize_on_start(self) -> None:
+        if sys.platform != "win32":
+            return
+
+        def work() -> None:
+            try:
+                apply_windows_optimizations(self.root_path, LOG_QUEUE.put)
+            except Exception as exc:
+                LOG_QUEUE.put(f"[windows] {exc}")
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _build_ui(self) -> None:
         header = Frame(self.tk, padx=12, pady=10)
@@ -280,10 +301,9 @@ class CompanyEdgeApp:
         cam_frame.pack(fill=BOTH, expand=True, padx=12, pady=4)
         self.camera_panel = CameraWizardPanel(
             cam_frame,
-            get_base_url=lambda: f"http://127.0.0.1:{self.port}",
             get_root=lambda: self.root_path,
             on_log=LOG_QUEUE.put,
-            is_server_running=lambda: self.server.running,
+            ensure_server=self.ensure_server_for_cameras,
         )
         self.camera_panel.pack(fill=BOTH, expand=True)
 
@@ -298,7 +318,7 @@ class CompanyEdgeApp:
         self.btn_browser = Button(btns, text="فتح المتصفح", width=12, command=self.open_browser)
         self.btn_browser.pack(side=LEFT, padx=4)
         self.btn_discover = Button(
-            btns, text="اكتشاف وربط الكاميرات", width=18, command=self.run_discover_provision
+            btns, text="Discover cameras", width=16, command=lambda: self.camera_panel.run_discover()
         )
         self.btn_discover.pack(side=LEFT, padx=4)
         self.btn_refresh = Button(btns, text="تحديث", width=8, command=self.refresh_status)
@@ -350,12 +370,11 @@ class CompanyEdgeApp:
             f"وضع التشغيل: منفذ واحد (UI + API + WebSocket + go2rtc)"
         )
         cfg = edge_config(self.root_path)
-        auto = "مفعّل" if cfg["auto_provision"] else "معطّل"
+        light = "ON" if cfg.get("light_mode") else "OFF"
         self.lbl_urls.config(
-            text=f"افتح من الشبكة المحلية (الهوست/المتصفح):\n  {base}\n"
-            f"API البث: {base}/api/streams/…/start\n"
-            f"تسجيل API: {cfg['api_user']} / (من .env)\n"
-            f"كاميرات: {cfg['camera_user']} — ربط تلقائي: {auto}"
+            text=f"Host / LAN:\n  {base}\n"
+            f"Light mode: {light} (ONVIF only, low CPU)\n"
+            f"Use ① Discover — starts server if stopped"
         )
         lines = [
             f"{'✓' if st.node else '✗'} Node.js",
@@ -430,26 +449,45 @@ class CompanyEdgeApp:
             return
         self._run_async(self._do_start)
 
-    def _do_start(self) -> None:
+    def _wait_server_ready(self, base_url: str, attempts: int = 40) -> bool:
+        for _ in range(attempts):
+            if health_ok(base_url):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def _start_server_sync(self) -> None:
         root = self.root_path
         st = check_prereqs(root)
         if not st.client_built:
-            raise RuntimeError("نفّذ «إعداد أولي» أولاً")
+            raise RuntimeError("Run Initial setup first")
         ensure_env_file(root)
         self.lan_ip = detect_lan_ip()
         env = build_edge_env(root, self.lan_ip)
         self.server.start(env, root)
-        LOG_QUEUE.put(f"[مشغّل] بدء السيرفر — {env['CLIENT_URL']}")
-        base_local = f"http://127.0.0.1:{self.port}"
-        ready = False
-        for _ in range(30):
-            if health_ok(base_local):
-                LOG_QUEUE.put("[مشغّل] السيرفر جاهز ✓")
-                ready = True
-                break
-            time.sleep(0.5)
-        if ready and edge_config(root)["auto_provision"]:
-            self._run_provision(base_local)
+        LOG_QUEUE.put(f"[launcher] Server starting — {env['CLIENT_URL']}")
+
+    def ensure_server_for_cameras(self, base_url: str) -> str:
+        """Start Node server if needed; return host URL when API is up."""
+        base = base_url.rstrip("/")
+        if health_ok(base):
+            return base
+        if self._busy and not self.server.running:
+            raise RuntimeError("Setup is running — wait…")
+        LOG_QUEUE.put("[launcher] Server not running — starting…")
+        if not self.server.running:
+            self._start_server_sync()
+        if not self._wait_server_ready(base):
+            raise RuntimeError(f"Server did not respond: {base}/api/health")
+        LOG_QUEUE.put("[launcher] Server ready")
+        return base
+
+    def _do_start(self) -> None:
+        base = self.camera_panel.get_base_url()
+        self.ensure_server_for_cameras(base)
+        LOG_QUEUE.put("[launcher] Server running (light mode — no auto scan)")
+        if edge_config(self.root_path)["auto_provision"]:
+            self._run_provision(base)
 
     def _run_provision(self, base_url: str, *, force: bool = False) -> None:
         def work() -> None:
@@ -459,14 +497,6 @@ class CompanyEdgeApp:
                 LOG_QUEUE.put(f"[وكيل] خطأ: {exc}")
 
         threading.Thread(target=work, daemon=True).start()
-
-    def run_discover_provision(self) -> None:
-        if not self.server.running:
-            Message.showwarning("تنبيه", "شغّل السيرفر أولاً")
-            return
-        base = f"http://127.0.0.1:{self.port}"
-        LOG_QUEUE.put("[وكيل] بدء اكتشاف وربط الكاميرات…")
-        self._run_provision(base, force=True)
 
     def stop_server(self) -> None:
         self.camera_panel.on_server_stopped()

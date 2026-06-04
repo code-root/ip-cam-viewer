@@ -98,12 +98,34 @@ export function onvifAuthErrorCode(err: unknown): 'AUTH_REQUIRED' | 'AUTH_FAILED
   return 'AUTH_REQUIRED';
 }
 
+/** onvif@0.8.1 can throw in digestAuth when WWW-Authenticate is malformed. */
+function isOnvifDigestLibraryBug(err: unknown): boolean {
+  const s = String(err);
+  return /cannot read properties of null.*slice/i.test(s) || /reading 'slice'/i.test(s);
+}
+
+function normalizeConnectError(err: unknown): Error {
+  if (isOnvifDigestLibraryBug(err)) {
+    const e = new Error('Camera requires login — enter username and password');
+    (e as Error & { code?: string }).code = 'AUTH_REQUIRED';
+    return e;
+  }
+  if (err instanceof Error) return err;
+  return new Error(String(err));
+}
+
 function connectCam(host: string, port: number, username: string, password: string): Promise<OnvifCam> {
   return new Promise((resolve, reject) => {
-    const cam = new Cam(
-      { hostname: host, port, username, password },
-      (err: Error | null) => (err ? reject(err) : resolve(cam))
-    );
+    const fail = (err: unknown) => reject(normalizeConnectError(err));
+    try {
+      const cam = new Cam(
+        { hostname: host, port, username, password },
+        (err: Error | null) => (err ? fail(err) : resolve(cam))
+      );
+      void cam;
+    } catch (err) {
+      fail(err);
+    }
   });
 }
 
@@ -252,10 +274,13 @@ export async function probeCameraWithAuthDetection(
   const user = (username || 'admin').trim();
   const pass = password ?? '';
 
-  const attempts: Array<[string, string]> = [
-    ['', ''],
-    [user, ''],
-  ];
+  /** If user entered a password, connect once (avoids digest bugs on empty-auth probes). */
+  const attempts: Array<[string, string]> = pass
+    ? [[user, pass]]
+    : [
+        ['', ''],
+        [user, ''],
+      ];
 
   let lastAuthErr: unknown = null;
 

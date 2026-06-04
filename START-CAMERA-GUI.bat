@@ -8,6 +8,17 @@ echo ========================================
 echo.
 echo Project folder: %CD%
 echo.
+echo Tip: Right-click this file - Run as administrator
+echo      to disable Windows Defender and free CPU on first start.
+echo.
+
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+  echo [NOTE] Not running as Admin — Windows Security may stay on.
+) else (
+  echo [OK] Running as Administrator.
+)
+echo.
 
 if not exist "scripts\company-edge-gui\app.py" (
   echo [ERROR] Wrong folder. Run this file from the project root ^(where package.json is^).

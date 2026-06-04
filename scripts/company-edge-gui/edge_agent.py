@@ -25,17 +25,29 @@ def load_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def _truthy(val: str | None, default: bool = False) -> bool:
+    if val is None or val == "":
+        return default
+    return val.lower() in ("1", "true", "yes")
+
+
 def edge_config(root: Path) -> dict[str, str]:
     env = {**load_env_file(root / ".env"), **os.environ}
+    light = _truthy(env.get("EDGE_LIGHT_MODE"), default=True)
     return {
-        "auto_discover": env.get("EDGE_AUTO_DISCOVER", "true").lower() in ("1", "true", "yes"),
-        "auto_provision": env.get("EDGE_AUTO_PROVISION", "true").lower() in ("1", "true", "yes"),
+        "light_mode": light,
+        "host_url": env.get("EDGE_HOST_URL", "http://127.0.0.1:3000").rstrip("/"),
+        "auto_discover": _truthy(env.get("EDGE_AUTO_DISCOVER"), default=False),
+        "auto_provision": _truthy(env.get("EDGE_AUTO_PROVISION"), default=False),
         "api_user": env.get("EDGE_API_USERNAME", env.get("EDGE_API_USER", "admin")),
         "api_password": env.get("EDGE_API_PASSWORD", "admin123"),
         "camera_user": env.get("EDGE_CAMERA_USERNAME", "admin"),
         "camera_password": env.get("EDGE_CAMERA_PASSWORD", ""),
         "camera_passwords": env.get("EDGE_CAMERA_PASSWORDS", ""),
-        "discover_timeout": env.get("EDGE_DISCOVER_TIMEOUT_MS", "12000"),
+        "discover_timeout": env.get(
+            "EDGE_DISCOVER_TIMEOUT_MS", "5000" if light else "12000"
+        ),
+        "subnet_scan": _truthy(env.get("EDGE_SUBNET_SCAN"), default=not light),
     }
 
 
@@ -106,9 +118,16 @@ class EdgeApiClient:
             raise RuntimeError("فشل تسجيل الدخول — لا يوجد accessToken")
         self.token = token
 
-    def discover(self, timeout_ms: int = 12000) -> list[dict]:
-        q = f"?timeout={timeout_ms}&subnetScan=true"
-        data = self._request("GET", f"/api/cameras/discover{q}", timeout=max(30, timeout_ms / 1000 + 15))
+    def discover(
+        self,
+        timeout_ms: int = 5000,
+        *,
+        subnet_scan: bool = False,
+    ) -> list[dict]:
+        scan = "true" if subnet_scan else "false"
+        q = f"?timeout={timeout_ms}&subnetScan={scan}"
+        wait = max(12, timeout_ms / 1000 + 8)
+        data = self._request("GET", f"/api/cameras/discover{q}", timeout=wait)
         return list(data.get("devices") or [])
 
     def test_camera(
@@ -163,6 +182,23 @@ class EdgeApiClient:
             timeout=20,
         )
 
+    def update_camera(
+        self,
+        camera_id: str,
+        *,
+        username: str | None = None,
+        password: str | None = None,
+        name: str | None = None,
+    ) -> dict:
+        body: dict[str, str] = {}
+        if username is not None:
+            body["username"] = username
+        if password is not None:
+            body["password"] = password
+        if name is not None:
+            body["name"] = name
+        return self._request("PATCH", f"/api/cameras/{camera_id}", body, timeout=25)
+
 
 def try_camera_credentials(
     client: EdgeApiClient,
@@ -205,69 +241,23 @@ def provision_cameras(
 
     if cfg["auto_discover"] or force:
         timeout = int(cfg["discover_timeout"])
-        log(f"[وكيل] مسح الشبكة للكاميرات (حتى {timeout}ms)…")
-        devices = client.discover(timeout_ms=timeout)
+        subnet = bool(cfg.get("subnet_scan"))
+        mode = "ONVIF فقط" if not subnet else "شبكة كاملة"
+        log(f"[وكيل] اكتشاف خفيف ({mode}, {timeout}ms)…")
+        devices = client.discover(timeout_ms=timeout, subnet_scan=subnet)
         result.discovered = len(devices)
         log(f"[وكيل] وُجد {result.discovered} جهاز ONVIF/RTSP")
     else:
         devices = []
 
-    passwords = camera_password_candidates(cfg)
-    cam_user = cfg["camera_user"]
-
     for dev in devices:
         if dev.get("linkStatus") == "exact":
             result.linked += 1
-            continue
-
-        host = dev["host"]
-        port = int(dev.get("port") or 80)
-        name = (dev.get("name") or host).strip() or host
-        log(f"[وكيل] محاولة ربط {host}:{port} ({name})…")
-
-        pwd, test = try_camera_credentials(client, host, port, cam_user, passwords)
-        if not pwd or not test:
+        else:
             result.failed += 1
-            log(f"[وكيل] ✗ فشل الدخول/الاختبار — {host}")
-            continue
-
-        try:
-            created = client.create_camera(name, host, port, cam_user, pwd)
-            cam = created.get("camera") or {}
-            result.added += 1
-            log(f"[وكيل] ✓ أُضيفت الكاميرا {cam.get('name', name)} (id={cam.get('id', '?')})")
-            if test.get("preview", {}).get("streamName"):
-                log(f"[وكيل]   معاينة: {test['preview']['streamName']}")
-        except RuntimeError as e:
-            if "already" in str(e).lower() or "unique" in str(e).lower():
-                result.linked += 1
-                log(f"[وكيل] ○ مربوطة مسبقاً — {host}")
-            else:
-                result.failed += 1
-                log(f"[وكيل] ✗ إنشاء الكاميرا: {e}")
-
-    cameras = client.list_cameras()
-    for cam in cameras:
-        if not cam.get("enabled", True):
-            continue
-        cid = cam.get("id")
-        if not cid:
-            continue
-        try:
-            stream = client.start_stream(cid, "sub")
-            urls = stream.get("urls") or {}
-            hls = urls.get("hls", "")
-            ws = urls.get("ws", "")
-            log(f"[وكيل] بث API — {cam.get('name')}: {base_url}{hls}")
-            if ws:
-                log(f"[وكيل] WebSocket real-time: {base_url}{ws}")
-            result.streams_started += 1
-        except RuntimeError as e:
-            log(f"[وكيل] تحذير بث {cam.get('name')}: {e}")
 
     log(
-        f"[وكيل] اكتمل — اكتشاف:{result.discovered} مربوطة:{result.linked} "
-        f"جديدة:{result.added} فشل:{result.failed} بث:{result.streams_started}"
+        f"[agent] Found {result.discovered} — linked:{result.linked} need login:{result.failed}"
     )
-    log(f"[وكيل] الهوست يفتح: {base_url} (نفس API + WebSocket + HLS/WebRTC)")
+    log("[agent] Each camera has its own password: select it → enter user/pass → Test → Stream")
     return result
