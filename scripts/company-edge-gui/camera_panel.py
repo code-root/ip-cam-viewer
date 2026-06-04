@@ -194,8 +194,17 @@ class CameraWizardPanel(Frame):
             try:
                 fn()
             except Exception as exc:
-                self.on_log(f"[cameras] error: {exc}")
-                self.after(0, lambda: Message.showerror("Error", str(exc)))
+                msg = str(exc)
+                self.on_log(f"[cameras] error: {msg}")
+                if "AUTH_FAILED" in msg or "Invalid username" in msg:
+                    msg += (
+                        "\n\nWrong username/password for THIS camera."
+                        "\nEach camera has different credentials (like the website)."
+                        "\nPort 2020 = check camera manual for ONVIF user/pass."
+                    )
+                elif "AUTH_REQUIRED" in msg:
+                    msg += "\n\nEnter this camera's password in the fields above."
+                self.after(0, lambda m=msg: Message.showerror("Error", m))
             finally:
                 self._busy = False
                 self.after(0, lambda: self._set_buttons(True))

@@ -20,7 +20,9 @@
     "start:edge": "npm run build && npm run start:edge:server -w server",
     "start:edge:win": "scripts\\start-company-edge.bat",
     "edge:gui": "python scripts/company-edge-gui/app.py",
-    "edge:gui:build": "scripts\\company-edge-gui\\build-windows.bat"
+    "edge:gui:build": "scripts\\company-edge-gui\\build-windows.bat",
+    "postinstall": "node scripts/patch-onvif-lib.js",
+    "patch:onvif": "node scripts/patch-onvif-lib.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

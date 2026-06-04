@@ -44,7 +44,19 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [1/2] Installing Python packages ^(python-socketio^)...
+where node >nul 2>&1
+if not errorlevel 1 (
+  echo [0/3] Patch ONVIF + quick server check...
+  node scripts\patch-onvif-lib.js 2>nul
+  if exist "server\dist\index.js" (
+    echo Server build OK
+  ) else (
+    echo [WARN] Run REBUILD-SERVER.bat once after copying new files
+  )
+  echo.
+)
+
+echo [1/3] Installing Python packages ^(python-socketio^)...
 %PY% -m pip install -r "scripts\company-edge-gui\requirements.txt"
 if errorlevel 1 (
   echo.
@@ -54,6 +66,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/2] Starting GUI...
+echo [2/3] Starting GUI...
 %PY% "scripts\company-edge-gui\app.py"
 pause

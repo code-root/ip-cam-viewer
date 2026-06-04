@@ -1,7 +1,9 @@
 import { createRequire } from 'module';
 import { decrypt } from '../lib/crypto.js';
+import { patchOnvifCam } from './patch-cam.js';
 
 const require = createRequire(import.meta.url);
+patchOnvifCam();
 const { Cam, Discovery } = require('onvif') as {
   Cam: new (
     options: { hostname: string; port?: number; username?: string; password?: string; path?: string },
@@ -145,7 +147,8 @@ export async function discoverDevices(
   const multicast = await new Promise<
     Array<{ host: string; port: number; name?: string; manufacturer?: string; source: string }>
   >((resolve) => {
-    Discovery.probe({ timeout: timeoutMs, resolve: true }, (err, cams) => {
+    /** resolve:false — do not open ONVIF sessions during scan (faster, fewer digest errors). */
+    Discovery.probe({ timeout: timeoutMs, resolve: false }, (err, cams) => {
       const found: Array<{ host: string; port: number; name?: string; manufacturer?: string; source: string }> = [];
       const seen = new Set<string>();
       for (const cam of cams || []) {

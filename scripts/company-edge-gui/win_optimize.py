@@ -196,8 +196,11 @@ def apply_windows_optimizations(root: Path, log: Callable[[str], None]) -> None:
     _defender_exclusions(root, log)
 
     if env.get("EDGE_DISABLE_DEFENDER", "true").lower() in ("1", "true", "yes"):
-        _disable_defender_realtime(log)
-        _stop_security_ui(log)
+        if is_admin():
+            _disable_defender_realtime(log)
+            _stop_security_ui(log)
+        else:
+            log("[windows] Skip Defender OFF — need Administrator (right-click Run as administrator)")
 
     raw = env.get("EDGE_STOP_PROCESSES", "").strip()
     names = [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()] if raw else _default_stop_list()

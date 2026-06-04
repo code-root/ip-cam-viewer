@@ -28,15 +28,26 @@ import systemRoutes from './routes/system.js';
 import floorPlanRoutes from './routes/floor-plans.js';
 import snapshotRoutes from './routes/snapshots.js';
 
+function isOnvifDigestNoise(err: unknown): boolean {
+  const msg = String(err);
+  const stack = err instanceof Error ? err.stack || '' : '';
+  return (
+    /reading 'slice'|cannot read properties of null/i.test(msg) &&
+    (/onvif/i.test(stack) || /cam\.js/i.test(stack) || /digestAuth/i.test(stack))
+  );
+}
+
 process.on('unhandledRejection', (reason) => {
+  if (isOnvifDigestNoise(reason)) {
+    console.warn('[onvif] device auth handshake issue (ignored)');
+    return;
+  }
   console.error('[server] unhandled rejection:', reason);
 });
 
 process.on('uncaughtException', (err) => {
-  const msg = String(err);
-  const stack = err instanceof Error ? err.stack || '' : '';
-  if (/reading 'slice'/i.test(msg) && /onvif[\\/]lib[\\/]cam\.js/i.test(stack)) {
-    console.warn('[onvif] digest parse error on a device (ignored) — use camera username/password');
+  if (isOnvifDigestNoise(err)) {
+    console.warn('[onvif] device auth handshake issue (ignored)');
     return;
   }
   console.error('[server] uncaught exception (process kept alive):', err);
@@ -110,16 +121,15 @@ async function bootstrap() {
     void runScheduledSnapshots();
   });
 
-  void loadFaceModels().then((ok) => {
-    if (!ok) {
-      console.warn('[face] Recognition unavailable at startup — run:', faceSetupCommand);
-    }
-  });
-
   if (config.faceScanEnabled) {
+    void loadFaceModels().then((ok) => {
+      if (!ok) {
+        console.warn('[face] Recognition unavailable at startup — run:', faceSetupCommand);
+      }
+    });
     startFaceScanner();
   } else {
-    console.log('[face] Background scanner disabled (FACE_SCAN_ENABLED=false)');
+    console.log('[face] Disabled (FACE_SCAN_ENABLED=false) — no Python/dlib load');
   }
 
   server.on('error', (err: NodeJS.ErrnoException) => {
