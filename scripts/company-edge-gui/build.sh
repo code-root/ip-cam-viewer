@@ -12,5 +12,10 @@ python3 -m PyInstaller \
   --distpath "$ROOT/dist-launcher" \
   --workpath "$ROOT/scripts/company-edge-gui/build" \
   --specpath "$ROOT/scripts/company-edge-gui" \
+  --hidden-import edge_agent \
+  --hidden-import edge_ws \
+  --hidden-import camera_panel \
+  --collect-all socketio \
+  --collect-all engineio \
   "$ROOT/scripts/company-edge-gui/app.py"
 echo "Built: $ROOT/dist-launcher/CompanyEdgeLauncher"

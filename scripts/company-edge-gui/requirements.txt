@@ -1,0 +1,2 @@
+# تشغيل الواجهة + WebSocket real-time
+python-socketio[client]>=5.11.0

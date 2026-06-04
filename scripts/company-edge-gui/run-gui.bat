@@ -12,5 +12,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
+%PY% -m pip install -q -r "%~dp0requirements.txt" 2>nul
 %PY% "%~dp0app.py"
 pause

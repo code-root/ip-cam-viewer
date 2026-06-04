@@ -13,8 +13,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyInstaller
-        run: python -m pip install --upgrade pip pyinstaller
+      - name: Install build deps
+        run: python -m pip install --upgrade pip -r scripts/company-edge-gui/requirements-build.txt
 
       - name: Build CompanyEdgeLauncher.exe
         run: |
@@ -26,6 +26,12 @@ jobs:
             --distpath dist-launcher `
             --workpath scripts/company-edge-gui/build `
             --specpath scripts/company-edge-gui `
+            --paths scripts/company-edge-gui `
+            --hidden-import edge_agent `
+            --hidden-import edge_ws `
+            --hidden-import camera_panel `
+            --collect-all socketio `
+            --collect-all engineio `
             scripts/company-edge-gui/app.py
 
       - name: Upload EXE artifact

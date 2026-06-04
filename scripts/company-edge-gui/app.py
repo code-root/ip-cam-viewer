@@ -20,6 +20,9 @@ import urllib.request
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
+
+from camera_panel import CameraWizardPanel
+from edge_agent import edge_config, provision_cameras
 from tkinter import (
     BOTH,
     END,
@@ -242,7 +245,7 @@ class CompanyEdgeApp:
 
         self.tk = Tk()
         self.tk.title(APP_TITLE)
-        self.tk.minsize(720, 520)
+        self.tk.minsize(900, 720)
         self.tk.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._build_ui()
@@ -273,6 +276,17 @@ class CompanyEdgeApp:
         self.lbl_prereq = Label(prereq, text="", justify=LEFT, font=("Segoe UI", 9))
         self.lbl_prereq.pack(anchor="w")
 
+        cam_frame = LabelFrame(self.tk, text="معالج الكاميرات — اكتشاف · دخول · اختبار · بث WebSocket", padx=8, pady=6)
+        cam_frame.pack(fill=BOTH, expand=True, padx=12, pady=4)
+        self.camera_panel = CameraWizardPanel(
+            cam_frame,
+            get_base_url=lambda: f"http://127.0.0.1:{self.port}",
+            get_root=lambda: self.root_path,
+            on_log=LOG_QUEUE.put,
+            is_server_running=lambda: self.server.running,
+        )
+        self.camera_panel.pack(fill=BOTH, expand=True)
+
         btns = Frame(self.tk, padx=12, pady=8)
         btns.pack(fill=X)
         self.btn_setup = Button(btns, text="إعداد أولي", width=14, command=self.run_setup)
@@ -283,14 +297,18 @@ class CompanyEdgeApp:
         self.btn_stop.pack(side=LEFT, padx=4)
         self.btn_browser = Button(btns, text="فتح المتصفح", width=12, command=self.open_browser)
         self.btn_browser.pack(side=LEFT, padx=4)
+        self.btn_discover = Button(
+            btns, text="اكتشاف وربط الكاميرات", width=18, command=self.run_discover_provision
+        )
+        self.btn_discover.pack(side=LEFT, padx=4)
         self.btn_refresh = Button(btns, text="تحديث", width=8, command=self.refresh_status)
         self.btn_refresh.pack(side=RIGHT, padx=4)
 
         log_frame = LabelFrame(self.tk, text="سجل التشغيل", padx=8, pady=8)
-        log_frame.pack(fill=BOTH, expand=True, padx=12, pady=8)
+        log_frame.pack(fill=BOTH, expand=True, padx=12, pady=4)
         scroll = Scrollbar(log_frame)
         scroll.pack(side=RIGHT, fill=Y)
-        self.log_text = Text(log_frame, height=14, wrap="word", yscrollcommand=scroll.set, font=("Consolas", 9))
+        self.log_text = Text(log_frame, height=8, wrap="word", yscrollcommand=scroll.set, font=("Consolas", 9))
         self.log_text.pack(fill=BOTH, expand=True)
         scroll.config(command=self.log_text.yview)
 
@@ -331,10 +349,13 @@ class CompanyEdgeApp:
             text=f"مجلد المشروع:\n  {self.root_path}\n"
             f"وضع التشغيل: منفذ واحد (UI + API + WebSocket + go2rtc)"
         )
+        cfg = edge_config(self.root_path)
+        auto = "مفعّل" if cfg["auto_provision"] else "معطّل"
         self.lbl_urls.config(
-            text=f"افتح من الشبكة المحلية:\n  {base}\n"
-            f"التحقق الصحي:\n  {base}/api/health\n"
-            f"تسجيل الدخول الافتراضي: admin / admin123"
+            text=f"افتح من الشبكة المحلية (الهوست/المتصفح):\n  {base}\n"
+            f"API البث: {base}/api/streams/…/start\n"
+            f"تسجيل API: {cfg['api_user']} / (من .env)\n"
+            f"كاميرات: {cfg['camera_user']} — ربط تلقائي: {auto}"
         )
         lines = [
             f"{'✓' if st.node else '✗'} Node.js",
@@ -353,6 +374,7 @@ class CompanyEdgeApp:
         state = "disabled" if busy else "normal"
         self.btn_setup.config(state=state)
         self.btn_start.config(state=state)
+        self.btn_discover.config(state=state)
 
     def _run_async(self, fn) -> None:
         if self._busy:
@@ -418,13 +440,36 @@ class CompanyEdgeApp:
         env = build_edge_env(root, self.lan_ip)
         self.server.start(env, root)
         LOG_QUEUE.put(f"[مشغّل] بدء السيرفر — {env['CLIENT_URL']}")
+        base_local = f"http://127.0.0.1:{self.port}"
+        ready = False
         for _ in range(30):
-            if health_ok(f"http://127.0.0.1:{self.port}"):
+            if health_ok(base_local):
                 LOG_QUEUE.put("[مشغّل] السيرفر جاهز ✓")
+                ready = True
                 break
             time.sleep(0.5)
+        if ready and edge_config(root)["auto_provision"]:
+            self._run_provision(base_local)
+
+    def _run_provision(self, base_url: str, *, force: bool = False) -> None:
+        def work() -> None:
+            try:
+                provision_cameras(base_url, self.root_path, LOG_QUEUE.put, force=force)
+            except Exception as exc:
+                LOG_QUEUE.put(f"[وكيل] خطأ: {exc}")
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def run_discover_provision(self) -> None:
+        if not self.server.running:
+            Message.showwarning("تنبيه", "شغّل السيرفر أولاً")
+            return
+        base = f"http://127.0.0.1:{self.port}"
+        LOG_QUEUE.put("[وكيل] بدء اكتشاف وربط الكاميرات…")
+        self._run_provision(base, force=True)
 
     def stop_server(self) -> None:
+        self.camera_panel.on_server_stopped()
         self.server.stop()
         LOG_QUEUE.put("[مشغّل] تم إيقاف السيرفر")
         self.refresh_status()
@@ -437,6 +482,7 @@ class CompanyEdgeApp:
         if self.server.running:
             if not Message.askyesno("إيقاف", "إيقاف السيرفر والخروج؟"):
                 return
+            self.camera_panel.on_server_stopped()
             self.server.stop()
         self.tk.destroy()
 

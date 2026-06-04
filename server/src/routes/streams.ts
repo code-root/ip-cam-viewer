@@ -11,6 +11,7 @@ import {
   fetchGo2rtcFrame,
 } from '../streams/go2rtc.js';
 import { config } from '../config.js';
+import { emitCameraEvent } from '../ws/hub.js';
 
 const router = Router();
 
@@ -99,18 +100,22 @@ authRouter.post('/:cameraId/start', async (req, res) => {
 
     const q = encodeURIComponent(streamToken);
     const src = encodeURIComponent(name);
-    res.json({
+    const payload = {
       streamName: name,
       streamToken,
+      cameraId: camera.id,
       urls: {
         webrtc: `/api/streams/proxy/webrtc?token=${q}`,
         hls: `/api/streams/proxy/hls.m3u8?token=${q}`,
         mjpeg: `/api/streams/proxy/frame.jpeg?token=${q}`,
-        /** Vite-proxied go2rtc snapshot (fewer hops; stream must be warmed via /start). */
+        /** go2rtc WebSocket (MSE/WebRTC signaling) — real-time relay for viewers. */
+        ws: `/go2rtc/api/ws?src=${src}`,
         frame: `/go2rtc/api/frame.jpeg?src=${src}`,
         direct: getStreamUrls(name),
       },
-    });
+    };
+    emitCameraEvent(camera.id, 'stream:started', payload);
+    res.json(payload);
   } catch (e) {
     res.status(400).json({ error: String(e) });
   }

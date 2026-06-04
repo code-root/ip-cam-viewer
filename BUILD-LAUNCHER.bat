@@ -63,7 +63,7 @@ set "WORKDIR=!GUI!\build"
 set "SPECDIR=!GUI!\."
 
 echo Building EXE (1-2 min)...
-!PY_LAUNCHER! !PY_VER! -m PyInstaller --noconfirm --onefile --windowed --name CompanyEdgeLauncher --distpath "!ROOT!\dist-launcher" --workpath "!WORKDIR!" --specpath "!SPECDIR!" "!SCRIPT!"
+!PY_LAUNCHER! !PY_VER! -m PyInstaller --noconfirm --onefile --windowed --name CompanyEdgeLauncher --distpath "!ROOT!\dist-launcher" --workpath "!WORKDIR!" --specpath "!SPECDIR!" --paths "!GUI!" --hidden-import edge_agent --hidden-import edge_ws --hidden-import camera_panel --collect-all socketio --collect-all engineio "!SCRIPT!"
 if errorlevel 1 goto :fail
 
 if not exist "!ROOT!\dist-launcher\CompanyEdgeLauncher.exe" (
