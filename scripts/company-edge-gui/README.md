@@ -1,80 +1,54 @@
-# مشغّل جهاز الشركة — واجهة رسومية / EXE
+# Company Edge GUI / EXE
 
-تطبيق Windows يشغّل **IP Camera Viewer** على PC داخل الشركة (كاميرات RTSP محلية + واجهة ويب + WebSocket + AI).
+Windows desktop app to run **IP Camera Viewer** on a company PC (local RTSP cameras + web UI + WebSocket + AI).
 
-## التشغيل بدون بناء EXE
+**Full install guide (English):** [../../INSTALL-COMPANY-GUI.md](../../INSTALL-COMPANY-GUI.md)
+
+## Quick run
+
+Double-click from project root:
 
 ```bat
-scripts\company-edge-gui\run-gui.bat
+START-CAMERA-GUI.bat
 ```
 
-أو:
+Or manually:
 
 ```bat
+cd C:\path\to\ip-cam-viewer-main
+pip install -r scripts\company-edge-gui\requirements.txt
 python scripts\company-edge-gui\app.py
 ```
 
-## بناء ملف EXE
+## Build EXE
 
-على **Windows** (مرة واحدة):
+On Windows:
 
 ```bat
-cd /d "C:\Users\...\Desktop\ip-cam-viewer-main"
 scripts\company-edge-gui\build-windows.bat
 ```
 
-**مهم:** شغّل الملف بالنقر المزدوج أو من CMD — لا تلصق محتوى الملف في سطر الأوامر.
+Output: `dist-launcher\CompanyEdgeLauncher.exe` — copy next to `package.json`.
 
-الناتج: `dist-launcher\CompanyEdgeLauncher.exe`
+## GUI actions
 
-**مهم:** انسخ `CompanyEdgeLauncher.exe` إلى **جذر المشروع** (نفس مجلد `package.json`) ثم شغّله.
+| Button | Action |
+|--------|--------|
+| **Initial setup** | `npm install`, build client/server, go2rtc, database |
+| **Start server** | Node on port 3000 (UI + API + WS + go2rtc) |
+| **Discover and link cameras** | Auto-discover and provision all cameras |
+| **Camera wizard** | ① Scan ② Test login ③ Stream + WebSocket |
+| **Stop** | Stop server |
+| **Open browser** | `http://PC-LAN-IP:3000` |
 
-## ماذا تفعل الواجهة؟
-
-| زر | الوظيفة |
-|----|---------|
-| **إعداد أولي** | `npm install`، بناء الواجهة، go2rtc، قاعدة البيانات |
-| **تشغيل السيرفر** | يشغّل Node على المنفذ 3000 (UI+API+WS+go2rtc) |
-| **اكتشاف وربط الكاميرات** | ربط تلقائي لكل الكاميرات |
-| **معالج الكاميرات** (في الواجهة) | ① مسح ② اختبار دخول ③ بث + WebSocket real-time |
-| **إيقاف** | يوقف العملية |
-| **فتح المتصفح** | `http://IP-الجهاز:3000` |
-
-بعد **تشغيل السيرفر**، إذا كان `EDGE_AUTO_PROVISION=true` في `.env` يُنفَّذ الاكتشاف والربط تلقائياً.
-
-### إعداد كلمات مرور الكاميرات
-
-في `.env` (انسخ من `.env.company-edge.example`):
-
-```env
-EDGE_CAMERA_USERNAME=admin
-EDGE_CAMERA_PASSWORD=admin123
-EDGE_API_USERNAME=admin
-EDGE_API_PASSWORD=admin123
-```
-
-الهوست (أي PC على VPN أو الشبكة) يفتح `http://IP-جهاز-الشركة:3000` — نفس الواجهة و`/api/streams/…` للبث (HLS/WebRTC)، دون فتح RTSP للإنترنت.
-
-### معالج الكاميرات (خطوة بخطوة)
-
-1. **▶ تشغيل السيرفر**
-2. أدخل **مستخدم/كلمة مرور الكاميرا** و **API** في المعالج
-3. **① مسح الشبكة** — اكتشاف ONVIF
-4. اختر كاميراً → **② اختبار الاتصال** — تسجيل دخول والتحقق
-5. **③ إضافة وبدء البث** — RTSP → go2rtc → API + `Socket.IO` + `ws://…/go2rtc/api/ws`
-
-```bat
-pip install -r scripts\company-edge-gui\requirements.txt
-```
-
-## المتطلبات على جهاز الشركة
+## Requirements
 
 - Windows 10/11
-- [Node.js LTS](https://nodejs.org/)
-- FFmpeg في PATH (للتسجيل)
-- Python + `.venv` (اختياري — للتعرف على الوجوه): `scripts\setup-face-python.bat`
+- Node.js LTS
+- Python 3.10+
+- FFmpeg in PATH (recordings)
 
-## الشبكة
+## Network
 
-- الكاميرات: `192.168.x.x` — يجب أن يراها **نفس الجهاز** الذي يشغّل المشغّل.
-- من خارج المكتب: VPN فقط — لا تفتح RTSP على الإنترنت.
+- Cameras must be visible from the **same PC** running this app.
+- Remote access: VPN only — do not expose RTSP to the internet.
