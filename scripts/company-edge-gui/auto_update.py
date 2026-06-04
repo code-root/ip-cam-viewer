@@ -173,6 +173,16 @@ def _run_build(root: Path, log: Callable[[str], None]) -> None:
     if r.returncode != 0:
         raise RuntimeError(f"npm run build failed: {r.stderr or r.stdout}")
 
+    go2rtc = root / "bin" / ("go2rtc.exe" if os.name == "nt" else "go2rtc")
+    if not go2rtc.is_file():
+        log("[update] go2rtc install…")
+        subprocess.run([npm, "run", "go2rtc:install"], cwd=str(root), check=False)
+
+    yolo = root / "server" / "models" / "yolov8n.pt"
+    if not yolo.is_file():
+        log("[update] ML models download…")
+        subprocess.run([npm, "run", "models:download"], cwd=str(root), check=False)
+
     env = os.environ.copy()
     env["DATABASE_URL"] = "file:./server/data/app.db"
     srv = root / "server"

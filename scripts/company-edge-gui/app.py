@@ -434,6 +434,9 @@ class CompanyEdgeApp:
         if not (root / "bin" / "go2rtc.exe").is_file() and not (root / "bin" / "go2rtc").is_file():
             run_cmd([npm, "run", "go2rtc:install"], root)
 
+        if not (root / "server" / "models" / "yolov8n.pt").is_file():
+            run_cmd([npm, "run", "models:download"], root)
+
         code = run_cmd([npm, "run", "build"], root)
         if code != 0:
             raise RuntimeError("فشل npm run build")

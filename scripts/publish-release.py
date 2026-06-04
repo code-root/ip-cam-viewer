@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Zip ip-cam-viewer and upload to api-stpreg project-releases API.
+Zip ip-cam-viewer (source-only release) and upload to api-stpreg project-releases API.
+
+Excludes: node_modules, dist, ML models, go2rtc, launcher binaries.
+Models and go2rtc are fetched on the edge via npm run models:download / go2rtc:install.
 
 Usage:
   python scripts/publish-release.py --version 1.0.1 --api https://your-api.com/api/internal --token YOUR_TOKEN
-
-Requires API token with update.server permission.
 """
 from __future__ import annotations
 
@@ -21,39 +22,100 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKIP_DIRS = {
-    "node_modules",
-    ".git",
-    ".venv",
-    "data",
-    "__pycache__",
-    ".updates",
-    "dist-launcher/build",
-    "scripts/company-edge-gui/build",
+
+# Exact paths under project root (posix).
+INCLUDE_FILES = {
+    "package.json",
+    "package-lock.json",
+    "VERSION",
+    ".env.example",
+    "PUBLISH-RELEASE.bat",
+    "START-CAMERA-GUI.bat",
+    "REBUILD-SERVER.bat",
+    "OPTIMIZE-WINDOWS-EDGE.bat",
+    "BUILD-LAUNCHER.bat",
+    "INSTALL-COMPANY-GUI.md",
+    "README.md",
+    "client/index.html",
+    "client/package.json",
+    "client/vite.config.ts",
+    "client/tsconfig.json",
+    "server/package.json",
+    "server/tsconfig.json",
 }
-SKIP_EXT = {".pyc", ".db", ".zip"}
+
+# Directory prefixes — only source, config, prisma, edge scripts (no dist/models/build).
+INCLUDE_PREFIXES = (
+    "client/src/",
+    "server/src/",
+    "server/prisma/",
+    "server/scripts/",
+    "config/",
+    "scripts/patch-onvif-lib.js",
+    "scripts/publish-release.py",
+    "scripts/release-and-publish.sh",
+    "scripts/download-edge-models.mjs",
+    "scripts/download_face_models.py",
+    "scripts/install-go2rtc.mjs",
+    "scripts/install-go2rtc.bat",
+    "scripts/install-go2rtc.sh",
+    "scripts/setup-windows.bat",
+    "scripts/setup-face-python.bat",
+    "scripts/setup-face-python.sh",
+    "scripts/start-company-edge.bat",
+    "scripts/install-company-edge-service.bat",
+    "scripts/run-detect-faces.bat",
+    "scripts/company-edge-gui/",
+)
+
+# Under scripts/company-edge-gui/ skip PyInstaller output.
+SKIP_PREFIXES = (
+    "scripts/company-edge-gui/build/",
+)
+
+SKIP_EXT = {".pyc", ".db", ".zip", ".tsbuildinfo"}
 
 
 def should_add(path: Path) -> bool:
     rel = path.relative_to(ROOT).as_posix()
-    if rel.startswith(".env"):
+    if not rel or rel.startswith(".env"):
         return False
-    parts = rel.split("/")
-    for p in parts:
-        if p in SKIP_DIRS:
+    for prefix in SKIP_PREFIXES:
+        if rel.startswith(prefix):
             return False
     if path.suffix.lower() in SKIP_EXT:
         return False
-    return True
+    if rel in INCLUDE_FILES:
+        return True
+    for prefix in INCLUDE_PREFIXES:
+        if rel.startswith(prefix):
+            # GUI: source + config only
+            if prefix == "scripts/company-edge-gui/":
+                name = path.name
+                if name.endswith((".py", ".bat", ".md", ".txt", ".spec")):
+                    return True
+                if name in ("requirements.txt", "requirements-build.txt"):
+                    return True
+                return False
+            return True
+    return False
 
 
 def build_zip(out: Path) -> None:
+    added = 0
+    skipped = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in ROOT.rglob("*"):
-            if not f.is_file() or not should_add(f):
+            if not f.is_file():
+                continue
+            size = f.stat().st_size
+            if not should_add(f):
+                skipped += size
                 continue
             zf.write(f, f.relative_to(ROOT).as_posix())
+            added += size
     print(f"Created {out} ({out.stat().st_size // 1024} KB)")
+    print(f"  included ~{added // 1024} KB source, skipped ~{skipped // 1024 // 1024} MB")
 
 
 def upload(api_base: str, project: str, version: str, token: str, zip_path: Path, notes: str) -> None:
