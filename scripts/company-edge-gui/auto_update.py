@@ -59,7 +59,8 @@ def _api_request(
 ) -> tuple[int, bytes]:
     h = {"Accept": "application/json", "User-Agent": "CompanyEdgeLauncher/1.0"}
     if token:
-        h["Authorization"] = f"Bearer {token}"
+        # api-stpreg internal API uses x-api-key (owner token), not Bearer
+        h["x-api-key"] = token
     if headers:
         h.update(headers)
     req = urllib.request.Request(url, data=data, headers=h, method=method)

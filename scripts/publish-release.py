@@ -78,7 +78,7 @@ def upload(api_base: str, project: str, version: str, token: str, zip_path: Path
         url,
         data=bytes(body),
         headers={
-            "Authorization": f"Bearer {token}",
+            "x-api-key": token,
             "Content-Type": f"multipart/form-data; boundary={boundary}",
         },
         method="POST",

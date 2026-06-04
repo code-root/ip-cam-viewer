@@ -13,7 +13,7 @@ if "%EDGE_UPDATES_API%"=="" (
   set /p EDGE_UPDATES_API=API base URL (e.g. https://api.example.com/api/internal): 
 )
 if "%EDGE_UPDATES_TOKEN%"=="" (
-  set /p EDGE_UPDATES_TOKEN=API Bearer token: 
+  set /p EDGE_UPDATES_TOKEN=API x-api-key token: 
 )
 
 echo.
