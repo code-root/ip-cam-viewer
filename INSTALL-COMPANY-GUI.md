@@ -181,7 +181,8 @@ The GUI and EXE can pull updates from your **api-stpreg** `project-updates` API 
 
 ### On api-stpreg (once)
 
-1. Add env: `PROJECT_RELEASE_ALLOWED_SLUGS=cfa,snapchat,ip-cam-viewer`
+1. On **storage-sys** (api-stpreg `.env`): `PROJECT_RELEASE_ALLOWED_SLUGS=cfa,snapchat,ip-cam-viewer` then `php artisan config:clear`.  
+   If upload returns **Unknown project**, the slug `ip-cam-viewer` is missing from that list (deploy latest api-stpreg or add the env line).
 2. In admin, upload a release zip for project **`ip-cam-viewer`**, or use the upload API.
 
 ### Publish a new version (developer PC)

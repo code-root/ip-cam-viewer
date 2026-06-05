@@ -149,11 +149,26 @@ def upload(api_base: str, project: str, version: str, token: str, zip_path: Path
         with urllib.request.urlopen(req, timeout=600) as resp:
             doc = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        print(e.read().decode(), file=sys.stderr)
+        body = e.read().decode()
+        print(body, file=sys.stderr)
+        if "Unknown project" in body:
+            print(
+                f"\nProject '{project}' is not allowed on the API server.\n"
+                "Deploy api-stpreg (core_slugs includes ip-cam-viewer) or set on the server:\n"
+                "  PROJECT_RELEASE_ALLOWED_SLUGS=cfa,snapchat,ip-cam-viewer\n"
+                "Then: php artisan config:clear",
+                file=sys.stderr,
+            )
         sys.exit(1)
 
     if not doc.get("success"):
         print(doc, file=sys.stderr)
+        if doc.get("message") == "Unknown project":
+            print(
+                f"\nProject '{project}' is not allowed on the API server.\n"
+                "Deploy api-stpreg or add ip-cam-viewer to PROJECT_RELEASE_ALLOWED_SLUGS.",
+                file=sys.stderr,
+            )
         sys.exit(1)
     print("Upload OK:", doc.get("data") or doc.get("message"))
 
@@ -162,7 +177,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Publish ip-cam-viewer release to API")
     ap.add_argument("--version", required=True, help="Semver e.g. 1.0.1")
     ap.add_argument("--api", default=os.environ.get("EDGE_UPDATES_API", ""), help="API base …/api/internal")
-    ap.add_argument("--project", default="ip-cam-viewer")
+    ap.add_argument(
+        "--project",
+        default=os.environ.get("EDGE_UPDATES_PROJECT", "ip-cam-viewer"),
+        help="Project slug on API (EDGE_UPDATES_PROJECT)",
+    )
     ap.add_argument("--token", default=os.environ.get("EDGE_UPDATES_TOKEN", ""))
     ap.add_argument("--notes", default="", help="Release notes")
     ap.add_argument("--zip-only", action="store_true", help="Build zip only, do not upload")
